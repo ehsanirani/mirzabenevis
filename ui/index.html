@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mirzabenevis</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="popup" id="popup">
+    <header class="bar" data-tauri-drag-region>
+      <nav class="actions" id="actions" aria-label="Actions"></nav>
+      <span class="model" id="model" title="Change in config.toml"></span>
+    </header>
+
+    <section class="pane original">
+      <textarea id="original" rows="3" spellcheck="false"
+        placeholder="Nothing selected. Paste or type text here."></textarea>
+    </section>
+
+    <section class="pane result" id="resultPane" hidden>
+      <div class="result-text" id="result" tabindex="0" aria-live="polite"></div>
+    </section>
+
+    <footer class="hint">
+      <span id="status"></span>
+      <span class="keys">
+        <kbd>Enter</kbd> paste
+        <kbd>Ctrl</kbd><kbd>C</kbd> copy
+        <kbd>R</kbd> redo
+        <kbd>Esc</kbd> close
+      </span>
+    </footer>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>

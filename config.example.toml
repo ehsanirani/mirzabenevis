@@ -1,0 +1,87 @@
+# mirzabenevis configuration
+# Lives at $XDG_CONFIG_HOME/mirzabenevis/config.toml (usually ~/.config/mirzabenevis/config.toml)
+# Create it with:  mirzabenevis-cli config init
+
+[general]
+# Action used by `mirzabenevis-cli run` with no argument and by the popup's Enter key.
+default_action = "fix"
+# Replace the selection with the result automatically (CLI and popup).
+auto_paste = true
+# Global hotkey for the popup. Only works on X11; on Wayland bind
+# `mirzabenevis --popup` in your compositor instead (see README).
+hotkey = "Ctrl+Space"
+
+[provider]
+# "openai" covers Ollama, LM Studio, llama.cpp, vLLM, Groq, OpenRouter, OpenAI itself.
+# "anthropic" uses the Messages API.
+kind = "openai"
+base_url = "http://localhost:11434/v1"
+model = "qwen2.5:7b"
+# Either put the key here, or (better) name an environment variable that holds it.
+api_key = ""
+api_key_env = "MIRZABENEVIS_API_KEY"
+max_tokens = 1024
+temperature = 0.2
+timeout_secs = 60
+
+[linux]
+# Where to read the text from. "primary" = the X11/Wayland primary selection
+# (whatever is highlighted, no Ctrl+C needed). "clipboard" = the normal clipboard.
+grab = "primary"
+# Commands used to grab and paste. First one that exists in PATH wins.
+# Paste commands receive the text on stdin.
+grab_cmds = [
+  ["wl-paste", "--primary", "--no-newline"],
+  ["xclip", "-o", "-selection", "primary"],
+]
+paste_cmds = [
+  ["wtype", "-"],
+  ["xdotool", "type", "--clearmodifiers", "--file", "-"],
+]
+# If no paste command is available, copy the result to the clipboard instead.
+fallback_to_clipboard = true
+
+# Actions appear in the popup in this order; `key` is the single-key shortcut.
+# {text} in a prompt is replaced by the selection. The system prompt is shared.
+system_prompt = """
+You are a writing assistant. You receive a piece of text and an instruction.
+Reply with ONLY the resulting text: no preamble, no explanations, no quotes,
+no markdown fences. Keep the original language, formatting and line breaks
+unless the instruction says otherwise.
+"""
+
+[[actions]]
+id = "fix"
+name = "Fix grammar"
+key = "1"
+prompt = "Fix spelling, grammar and punctuation. Change nothing else.\n\n{text}"
+
+[[actions]]
+id = "improve"
+name = "Improve"
+key = "2"
+prompt = "Improve clarity and flow while keeping the meaning and tone.\n\n{text}"
+
+[[actions]]
+id = "concise"
+name = "Make concise"
+key = "3"
+prompt = "Rewrite this to be shorter and more direct without losing information.\n\n{text}"
+
+[[actions]]
+id = "formal"
+name = "Formal"
+key = "4"
+prompt = "Rewrite this in a polite, professional tone.\n\n{text}"
+
+[[actions]]
+id = "casual"
+name = "Casual"
+key = "5"
+prompt = "Rewrite this in a relaxed, friendly tone.\n\n{text}"
+
+[[actions]]
+id = "translate"
+name = "To English"
+key = "6"
+prompt = "Translate this to natural English. If it is already English, fix it instead.\n\n{text}"
