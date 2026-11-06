@@ -10,8 +10,8 @@
 
 use futures_util::future::{AbortHandle, Abortable};
 use mirzabenevis_core::config::{
-    self, default_actions, default_modifiers, General, Modifier, Output, PasteMode, Translate,
-    RESERVED_KEYS,
+    self, default_actions, default_modifiers, Appearance, General, Modifier, Output, PasteMode,
+    Translate, RESERVED_KEYS,
 };
 use mirzabenevis_core::{backends, history, text, Action, Backend, Config, Detection, Turn};
 use serde::{Deserialize, Serialize};
@@ -95,6 +95,7 @@ struct Info {
     max_input_chars: usize,
     /// `general.explain_in`
     explain_in: String,
+    appearance: Appearance,
 }
 
 /// What a result being accepted came from, for the history (`undo`).
@@ -223,6 +224,7 @@ struct SettingsView {
     general: General,
     paste: PasteMode,
     translate: Translate,
+    appearance: Appearance,
     max_tokens: u32,
     temperature: f64,
     timeout_secs: u64,
@@ -247,6 +249,7 @@ fn settings_view(c: &Config) -> SettingsView {
         general: c.general.clone(),
         paste: c.linux.paste,
         translate: c.translate.clone(),
+        appearance: c.appearance.clone(),
         max_tokens: c.provider.max_tokens,
         temperature: c.provider.temperature,
         timeout_secs: c.provider.timeout_secs,
@@ -273,23 +276,6 @@ fn saved(state: &AppState, fresh: anyhow::Result<Config>) -> Result<SettingsView
     Ok(view)
 }
 
-/// What `set_setting` may change (never keys, URLs or commands).
-const SETTINGS: &[&str] = &[
-    "general.default_action",
-    "general.auto_paste",
-    "general.notify",
-    "general.history",
-    "general.explain_in",
-    "general.hotkey",
-    "general.max_input_chars",
-    "linux.paste",
-    "translate.target",
-    "translate.targets",
-    "provider.max_tokens",
-    "provider.temperature",
-    "provider.timeout_secs",
-];
-
 /// Save one setting (text, boolean, number or list of texts) in config.toml.
 #[tauri::command]
 fn set_setting(
@@ -298,10 +284,7 @@ fn set_setting(
     value: serde_json::Value,
 ) -> Result<SettingsView, String> {
     let path: Vec<&str> = path.iter().map(String::as_str).collect();
-    if !SETTINGS
-        .iter()
-        .any(|s| s.split('.').eq(path.iter().copied()))
-    {
+    if !config::settable(&path) {
         return Err(format!("`{}` cannot be set here", path.join(".")));
     }
     let value = config::toml_value(&value).map_err(|e| format!("{e:#}"))?;
@@ -309,6 +292,15 @@ fn set_setting(
     saved(
         &state,
         Config::edit_file(|doc| config::set_doc_value(doc, &path, value)),
+    )
+}
+
+/// Put a tab of the settings page (or `"everything"`) back to the defaults.
+#[tauri::command]
+fn reset_section(state: State<AppState>, section: String) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::reset_section(doc, &section)),
     )
 }
 
@@ -387,6 +379,7 @@ fn get_info(state: State<AppState>) -> Info {
         modifiers: c.modifiers.clone(),
         max_input_chars: c.general.max_input_chars,
         explain_in: c.general.explain_in.clone(),
+        appearance: c.appearance.clone(),
     }
 }
 
@@ -842,6 +835,7 @@ pub fn run() {
             get_info,
             get_settings,
             set_setting,
+            reset_section,
             set_action,
             move_action,
             reset_action,

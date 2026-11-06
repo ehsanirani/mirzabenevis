@@ -122,6 +122,22 @@ login_shell_env = true
 target = "en"
 targets = ["en", "de", "fa"]
 
+[appearance]
+# The popup's look (also on its settings page, Ctrl+,). "system" follows the
+# desktop's light/dark setting; or "light" / "dark".
+theme = "system"
+# Zoom of the whole popup, 0.8 to 1.4 (Ctrl+= / Ctrl+- / Ctrl+0 in the popup).
+zoom = 1.0
+# Base font size in px, and a font family ("" = the system font).
+font_size = 14
+font = ""
+# Accent colour as "#rrggbb" ("" = the theme's).
+accent = ""
+# Size the popup opens at, in px (at least 520 x 360). Resizing the window is
+# remembered until this changes.
+window_width = 720
+window_height = 520
+
 # Actions appear in the popup in this order; `key` is the single-key shortcut.
 # {text} in a prompt is replaced by the selection (wrapped in <text> tags);
 # without {text} the selection goes after the prompt. Optional per action:

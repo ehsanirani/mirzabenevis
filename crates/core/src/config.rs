@@ -22,6 +22,8 @@ pub struct Config {
     pub linux: Linux,
     #[serde(default)]
     pub translate: Translate,
+    #[serde(default)]
+    pub appearance: Appearance,
     #[serde(default = "default_actions")]
     pub actions: Vec<Action>,
     #[serde(default = "default_modifiers")]
@@ -39,6 +41,34 @@ pub struct Config {
 pub struct Translate {
     pub target: String,
     pub targets: Vec<String>,
+}
+
+/// The popup's look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    pub theme: Theme,
+    /// 0.8 to 1.4
+    pub zoom: f64,
+    /// Base font size in px.
+    pub font_size: u32,
+    /// Font family; empty = the system font.
+    pub font: String,
+    /// `#rrggbb`; empty = the theme's.
+    pub accent: String,
+    /// Size the popup opens at, in px.
+    pub window_width: u32,
+    pub window_height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// Follow the desktop's light/dark setting.
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 /// A toggle in the popup that appends `suffix` to the next run's prompt.
@@ -304,6 +334,19 @@ impl Default for Translate {
         }
     }
 }
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: Theme::System,
+            zoom: 1.0,
+            font_size: 14,
+            font: String::new(),
+            accent: String::new(),
+            window_width: 720,
+            window_height: 520,
+        }
+    }
+}
 impl Default for Custom {
     fn default() -> Self {
         Self {
@@ -529,13 +572,113 @@ fn edit_path(
     Ok(cfg)
 }
 
+/// What the settings page changes, by tab: dotted keys, or a whole list of
+/// tables (`actions`, `modifiers`). Nothing else in the file (API keys,
+/// custom backends, grab/paste commands) is touched by the page.
+pub const SECTIONS: &[(&str, &[&str])] = &[
+    (
+        "general",
+        &[
+            "general.default_action",
+            "general.auto_paste",
+            "general.notify",
+            "general.history",
+            "general.explain_in",
+            "linux.paste",
+        ],
+    ),
+    (
+        "appearance",
+        &[
+            "appearance.theme",
+            "appearance.zoom",
+            "appearance.font_size",
+            "appearance.font",
+            "appearance.accent",
+            "appearance.window_width",
+            "appearance.window_height",
+        ],
+    ),
+    ("actions", &["actions"]),
+    ("modifiers", &["modifiers"]),
+    ("translate", &["translate.target", "translate.targets"]),
+    (
+        "advanced",
+        &[
+            "provider.max_tokens",
+            "provider.temperature",
+            "provider.timeout_secs",
+            "general.max_input_chars",
+            "general.hotkey",
+        ],
+    ),
+];
+
+/// A key the settings page may set (not the lists, which have their own edits).
+pub fn settable(path: &[&str]) -> bool {
+    path.len() > 1
+        && SECTIONS
+            .iter()
+            .flat_map(|(_, keys)| keys.iter())
+            .any(|k| k.split('.').eq(path.iter().copied()))
+}
+
+/// Remove what the settings page manages in `section` (or in all of them:
+/// `"everything"`) from the file, so the defaults apply again. Comments
+/// elsewhere stay.
+pub fn reset_section(doc: &mut toml_edit::DocumentMut, section: &str) -> Result<()> {
+    let keys: Vec<&str> = SECTIONS
+        .iter()
+        .filter(|(name, _)| section == "everything" || *name == section)
+        .flat_map(|(_, keys)| keys.iter().copied())
+        .collect();
+    if keys.is_empty() {
+        anyhow::bail!("no settings section `{section}`");
+    }
+    for key in keys {
+        let parts: Vec<&str> = key.split('.').collect();
+        let (last, parents) = parts.split_last().expect("not empty");
+        let mut table = Some(doc.as_table_mut());
+        for p in parents {
+            table = table
+                .and_then(|t| t.get_mut(p))
+                .and_then(|i| i.as_table_mut());
+        }
+        if let Some(t) = table {
+            t.remove(last);
+        }
+    }
+    Ok(())
+}
+
 /// Limits the settings page keeps to (a value outside them may still load
 /// from the file, but makes little sense).
 pub fn check_setting(path: &[&str], value: &toml_edit::Value) -> Result<()> {
     let number = value
         .as_float()
         .or_else(|| value.as_integer().map(|i| i as f64));
+    let outside = |lo: f64, hi: f64| !number.is_some_and(|n| (lo..=hi).contains(&n));
     match path {
+        ["appearance", "zoom"] if outside(0.8, 1.4) => anyhow::bail!("zoom is between 0.8 and 1.4"),
+        ["appearance", "font_size"] if outside(8.0, 32.0) => {
+            anyhow::bail!("the font size is between 8 and 32 px")
+        }
+        ["appearance", "window_width"] if outside(520.0, 10_000.0) => {
+            anyhow::bail!("the width is at least 520 px")
+        }
+        ["appearance", "window_height"] if outside(360.0, 10_000.0) => {
+            anyhow::bail!("the height is at least 360 px")
+        }
+        ["appearance", "accent"]
+            if !value.as_str().is_some_and(|c| {
+                c.is_empty()
+                    || (c.len() == 7
+                        && c.starts_with('#')
+                        && c[1..].chars().all(|h| h.is_ascii_hexdigit()))
+            }) =>
+        {
+            anyhow::bail!("the accent is a colour like #1f7a6d, or empty")
+        }
         ["provider", "temperature"] if !number.is_some_and(|t| (0.0..=2.0).contains(&t)) => {
             anyhow::bail!("the temperature is between 0 and 2")
         }
@@ -941,6 +1084,7 @@ mod tests {
         assert_eq!(c.provider, Provider::default());
         assert_eq!(c.linux, Linux::default());
         assert_eq!(c.translate, Translate::default());
+        assert_eq!(c.appearance, Appearance::default());
         assert!(c.system_prompt.contains("writing assistant"));
     }
 
@@ -1077,6 +1221,80 @@ mod tests {
         // A string where a number belongs does not load.
         let bad = set_toml_value(&out, &["provider", "max_tokens"], "many").unwrap();
         assert!(Config::from_user_toml(&bad).is_err());
+    }
+
+    #[test]
+    fn reset_sections_remove_only_their_keys() {
+        let mut doc: toml_edit::DocumentMut = DEFAULT_CONFIG.parse().unwrap();
+        let mut set =
+            |path: &[&str], v: toml_edit::Value| set_doc_value(&mut doc, path, v).unwrap();
+        set(&["provider", "custom", "api_key"], "secret".into());
+        set(&["general", "auto_paste"], false.into());
+        set(&["general", "hotkey"], "Ctrl+Space".into());
+        set(&["linux", "paste"], "type".into());
+        set(&["appearance", "theme"], "dark".into());
+        reset_section(&mut doc, "general").unwrap();
+        let out = doc.to_string();
+        let c = Config::from_user_toml(&out).unwrap();
+        assert!(c.general.auto_paste);
+        assert_eq!(c.linux.paste, PasteMode::Clipboard);
+        // Other tabs, secrets, tool lists and the comments around them stay.
+        assert_eq!(c.general.hotkey, "Ctrl+Space");
+        assert_eq!(c.appearance.theme, Theme::Dark);
+        assert_eq!(c.provider.custom.api_key, "secret");
+        assert_eq!(c.linux.paste_cmds, Linux::default().paste_cmds);
+        assert!(out.contains("# Which AI backend to use."), "{out}");
+        assert!(
+            out.contains("[linux]\n# Where to read the text from."),
+            "{out}"
+        );
+        assert!(!out.contains("auto_paste"));
+
+        reset_section(&mut doc, "everything").unwrap();
+        let out = doc.to_string();
+        let c = Config::from_user_toml(&out).unwrap();
+        assert_eq!(
+            (c.general.hotkey.as_str(), c.appearance.theme),
+            ("", Theme::System)
+        );
+        assert_eq!(c.actions.len(), default_actions().len());
+        assert!(!out.contains("[[actions]]") && !out.contains("[[modifiers]]"));
+        assert_eq!(c.provider.custom.api_key, "secret");
+        assert!(out.contains("use = \"auto\""));
+        assert!(out.contains("grab_cmds = ["));
+        assert!(reset_section(&mut doc, "provider").is_err());
+
+        // What the page may set: its own keys, never secrets or lists.
+        assert!(settable(&["appearance", "zoom"]));
+        assert!(settable(&["linux", "paste"]));
+        assert!(!settable(&["provider", "custom", "api_key"]));
+        assert!(!settable(&["actions"]));
+        assert!(!settable(&["general.auto_paste"]));
+    }
+
+    #[test]
+    fn appearance_values_are_checked() {
+        let json = |s: &str| toml_value(&serde_json::from_str(s).unwrap()).unwrap();
+        for (key, v, ok) in [
+            ("zoom", "1.4", true),
+            ("zoom", "1", true),
+            ("zoom", "1.5", false),
+            ("zoom", "0.7", false),
+            ("font_size", "14", true),
+            ("font_size", "4", false),
+            ("window_width", "519", false),
+            ("window_height", "360", true),
+            ("accent", r##""#1F7a6d""##, true),
+            ("accent", r#""""#, true),
+            ("accent", r#""teal""#, false),
+            ("accent", r##""#12345""##, false),
+            ("accent", r##""#12345g""##, false),
+        ] {
+            let r = check_setting(&["appearance", key], &json(v));
+            assert_eq!(r.is_ok(), ok, "{key} {v}");
+        }
+        let out = set_toml_value("", &["appearance", "theme"], "blue").unwrap();
+        assert!(Config::from_user_toml(&out).is_err());
     }
 
     #[test]
