@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "identifier": "dev.mirzabenevis.app",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "cargo build --release -p mirzabenevis-cli"
   },
   "app": {
     "withGlobalTauri": true,
@@ -36,10 +37,30 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
-    "icon": ["icons/icon.png"],
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "category": "Utility",
+    "shortDescription": "Select text anywhere, press a key, get it rewritten",
+    "longDescription": "Select text in any app, press a key, and get it fixed, rewritten or translated, pasted back over the selection. Uses the AI you already have: API keys, Claude Code, Codex, Ollama and others.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
     "linux": {
-      "deb": { "depends": [] }
+      "deb": {
+        "recommends": [
+          "wl-clipboard",
+          "ydotool",
+          "libnotify-bin"
+        ],
+        "files": {
+          "/usr/bin/mirzabenevis-cli": "../target/release/mirzabenevis-cli"
+        }
+      }
     }
   }
 }
