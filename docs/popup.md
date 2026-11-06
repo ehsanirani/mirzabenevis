@@ -54,11 +54,12 @@ lists, **bold**, `code`, code blocks, tables); Copy always copies the raw text.
 **Settings** (`Ctrl+,` or `☰` → Settings…) edit `config.toml` for you, comments kept. A
 change is saved as soon as you leave the field (there is no Save button) and applies right
 away; the dialog's status line says "Saved". A value the config would not accept (a key the
-popup reserves or another action or modifier uses, a word where a number belongs, ...) is not
+popup reserves or another action or modifier uses, a temperature outside 0–2, ...) is not
 written: the field turns red with the reason. Tabs:
 
 - **General**: the default action (Enter), replace automatically, paste by clipboard + Ctrl+V
-  or by typing, history, desktop notifications (CLI), the language of explanations.
+  or by typing, history, desktop notifications (CLI), the language of explanations, and a
+  reminder of the zoom keys.
 - **Actions**: every action's name, key, output, backend (blank = whatever the popup uses),
   model and prompt. `↑`/`↓` reorder them (the order of the chips), *+ Add action* adds one
   and puts the cursor in its prompt, built-in actions have *Reset to default* (name, key,

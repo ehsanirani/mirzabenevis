@@ -73,5 +73,5 @@ in `backends_qa_tests.rs` and, for a new transport, an e2e case with the mock se
 
 ## Roadmap
 
-- [ ] Settings window (today: edit the TOML, "Reload config" in the tray)
+- [x] Settings window (`Ctrl+,` or ☰ → Settings…, see [popup.md](popup.md#popup-app))
 - [ ] macOS / Windows grab & paste backends (core is already OS-agnostic)
