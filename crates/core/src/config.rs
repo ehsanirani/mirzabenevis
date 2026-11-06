@@ -238,7 +238,7 @@ fn default_system_prompt() -> String {
 pub fn default_actions() -> Vec<Action> {
     embedded().actions
 }
-fn default_modifiers() -> Vec<Modifier> {
+pub fn default_modifiers() -> Vec<Modifier> {
     embedded().modifiers
 }
 
@@ -441,9 +441,9 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Set one string value in the config file (see [`Config::edit_file`]).
+    /// Set one value in the config file (see [`Config::edit_file`]).
     /// `path` is a dotted key path such as `["provider", "use"]`.
-    pub fn set_in_file(path: &[&str], value: &str) -> Result<PathBuf> {
+    pub fn set_in_file(path: &[&str], value: impl Into<toml_edit::Value>) -> Result<PathBuf> {
         Self::edit_file(|doc| set_doc_value(doc, path, value))?;
         Self::path()
     }
@@ -483,13 +483,23 @@ impl Config {
 }
 
 /// Pure helper behind [`Config::set_in_file`].
-pub fn set_toml_value(raw: &str, path: &[&str], value: &str) -> Result<String> {
+pub fn set_toml_value(
+    raw: &str,
+    path: &[&str],
+    value: impl Into<toml_edit::Value>,
+) -> Result<String> {
     let mut doc: toml_edit::DocumentMut = raw.parse().context("config is not valid TOML")?;
     set_doc_value(&mut doc, path, value)?;
     Ok(doc.to_string())
 }
 
-fn set_doc_value(doc: &mut toml_edit::DocumentMut, path: &[&str], value: &str) -> Result<()> {
+/// Set `path` (creating its tables) to `value`, keeping the comment after an
+/// existing value.
+pub fn set_doc_value(
+    doc: &mut toml_edit::DocumentMut,
+    path: &[&str],
+    value: impl Into<toml_edit::Value>,
+) -> Result<()> {
     let (last, parents) = path.split_last().context("empty key path")?;
     let mut table = doc.as_table_mut();
     for key in parents {
@@ -500,41 +510,117 @@ fn set_doc_value(doc: &mut toml_edit::DocumentMut, path: &[&str], value: &str) -
             .as_table_mut()
             .with_context(|| format!("`{key}` is not a table"))?;
     }
-    match table.get_mut(last).and_then(|i| i.as_value_mut()) {
-        // Keep the comment that sits after the existing value.
-        Some(v) => {
-            let decor = v.decor().clone();
-            *v = toml_edit::Value::from(value);
-            *v.decor_mut() = decor;
-        }
-        None => {
-            table.insert(last, toml_edit::value(value));
-        }
-    }
+    put(table, last, value.into());
     Ok(())
 }
 
-/// The file's `[[actions]]`. Your actions replace the built-in ones, so a
-/// file without any first gets a copy of them (`materialise`).
-fn actions_of(
-    doc: &mut toml_edit::DocumentMut,
-    materialise: bool,
-) -> Result<&mut toml_edit::ArrayOfTables> {
-    if materialise && !doc.contains_key("actions") {
-        let defaults: toml_edit::DocumentMut = DEFAULT_CONFIG.parse()?;
-        let mut aot = defaults["actions"]
-            .as_array_of_tables()
-            .context("no default actions")?
-            .clone();
-        // After everything already in the file.
-        for (i, t) in aot.iter_mut().enumerate() {
-            t.set_position(1_000_000 + i);
+fn put(table: &mut toml_edit::Table, key: &str, mut value: toml_edit::Value) {
+    match table.get_mut(key).and_then(|i| i.as_value_mut()) {
+        Some(v) => {
+            *value.decor_mut() = v.decor().clone();
+            *v = value;
         }
-        doc.insert("actions", toml_edit::Item::ArrayOfTables(aot));
+        None => {
+            value.decor_mut().clear();
+            table.insert(key, toml_edit::Item::Value(value));
+        }
     }
-    doc.get_mut("actions")
+}
+
+/// A value from the popup's settings as TOML: text, a boolean, a number
+/// (integers stay integers) or a list of texts.
+pub fn toml_value(v: &serde_json::Value) -> Result<toml_edit::Value> {
+    use serde_json::Value as J;
+    Ok(match v {
+        J::String(s) => s.as_str().into(),
+        J::Bool(b) => (*b).into(),
+        J::Number(n) => match n.as_i64() {
+            Some(i) => i.into(),
+            None => n.as_f64().context("not a number")?.into(),
+        },
+        J::Array(a) => a
+            .iter()
+            .map(|x| x.as_str().context("a list can only hold text"))
+            .collect::<Result<toml_edit::Array>>()?
+            .into(),
+        _ => anyhow::bail!("cannot save {v} in the config"),
+    })
+}
+
+/// The file's `[[actions]]` or `[[modifiers]]` (`list`). Yours replace the
+/// built-in ones, so a file without any first gets a copy of them
+/// (`materialise`).
+fn list_of<'a>(
+    doc: &'a mut toml_edit::DocumentMut,
+    list: &str,
+    materialise: bool,
+) -> Result<&'a mut toml_edit::ArrayOfTables> {
+    if materialise && !doc.contains_key(list) {
+        // A built-in modifier loses a key one of your actions uses, as when loading.
+        let loaded = Config::from_user_toml(&doc.to_string())?;
+        let defaults: toml_edit::DocumentMut = DEFAULT_CONFIG.parse()?;
+        let mut aot = defaults[list]
+            .as_array_of_tables()
+            .with_context(|| format!("no default {list}"))?
+            .clone();
+        // After everything already in the file (modifiers after actions).
+        let base = if list == "actions" {
+            1_000_000
+        } else {
+            2_000_000
+        };
+        for (i, t) in aot.iter_mut().enumerate() {
+            t.set_position(base + i);
+            if list == "modifiers" && loaded.modifiers.get(i).is_some_and(|m| m.key.is_empty()) {
+                t.remove("key");
+            }
+        }
+        doc.insert(list, toml_edit::Item::ArrayOfTables(aot));
+    }
+    doc.get_mut(list)
         .and_then(|i| i.as_array_of_tables_mut())
-        .context("`actions` is not a list of [[actions]] tables")
+        .with_context(|| format!("`{list}` is not a list of [[{list}]] tables"))
+}
+
+/// "action" or "modifier"
+fn noun(list: &str) -> &str {
+    list.strip_suffix('s').unwrap_or(list)
+}
+
+fn id_of(t: &toml_edit::Table) -> Option<&str> {
+    t.get("id").and_then(|v| v.as_str())
+}
+
+/// Index of the entry `id` in the file's `list`.
+fn index_of(aot: &toml_edit::ArrayOfTables, list: &str, id: &str) -> Result<usize> {
+    aot.iter()
+        .position(|t| id_of(t) == Some(id))
+        .with_context(|| format!("no {} `{id}` in the config file", noun(list)))
+}
+
+/// The built-in entries of `list`, as written in the default config.
+fn default_entries(list: &str) -> Result<Vec<toml_edit::Table>> {
+    let defaults: toml_edit::DocumentMut = DEFAULT_CONFIG.parse()?;
+    Ok(defaults[list]
+        .as_array_of_tables()
+        .with_context(|| format!("no default {list}"))?
+        .iter()
+        .cloned()
+        .collect())
+}
+
+/// `slug`, else `slug-2`, `slug-3`, ...: the first id not `taken`.
+fn free_id(slug: &str, taken: impl Fn(&str) -> bool) -> String {
+    (1..)
+        .map(|n| {
+            if n == 1 {
+                slug.to_string()
+            } else {
+                format!("{slug}-{n}")
+            }
+        })
+        .find(|id| !taken(id))
+        .expect("some suffix is free")
 }
 
 /// Append a click-only action that runs `prompt` (output = replace); returns
@@ -570,23 +656,10 @@ pub fn add_action_to(doc: &mut toml_edit::DocumentMut, prompt: &str) -> Result<S
         .collect();
 
     let builtin = default_actions();
-    let actions = actions_of(doc, true)?;
-    let taken = |id: &str| {
-        builtin.iter().any(|a| a.id == id)
-            || actions
-                .iter()
-                .any(|t| t.get("id").and_then(|v| v.as_str()) == Some(id))
-    };
-    let id = (1..)
-        .map(|n| {
-            if n == 1 {
-                slug.clone()
-            } else {
-                format!("{slug}-{n}")
-            }
-        })
-        .find(|id| !taken(id))
-        .expect("some suffix is free");
+    let actions = list_of(doc, "actions", true)?;
+    let id = free_id(&slug, |id| {
+        builtin.iter().any(|a| a.id == id) || actions.iter().any(|t| id_of(t) == Some(id))
+    });
     let mut t = toml_edit::Table::new();
     t["id"] = toml_edit::value(&id);
     t["name"] = toml_edit::value(name);
@@ -594,6 +667,144 @@ pub fn add_action_to(doc: &mut toml_edit::DocumentMut, prompt: &str) -> Result<S
     t["output"] = toml_edit::value("replace");
     actions.push(t);
     Ok(id)
+}
+
+/// Append a modifier for the user to fill in; returns its id (`custom`, `custom-2`, ...).
+pub fn add_modifier_to(doc: &mut toml_edit::DocumentMut) -> Result<String> {
+    let builtin = default_modifiers();
+    let mods = list_of(doc, "modifiers", true)?;
+    let id = free_id("custom", |id| {
+        builtin.iter().any(|m| m.id == id) || mods.iter().any(|t| id_of(t) == Some(id))
+    });
+    let mut t = toml_edit::Table::new();
+    t["id"] = toml_edit::value(&id);
+    t["name"] = toml_edit::value("New modifier");
+    t["suffix"] = toml_edit::value("Use simpler words.");
+    mods.push(t);
+    Ok(id)
+}
+
+/// The fields of an entry the popup's settings edit.
+fn fields(list: &str) -> &'static [&'static str] {
+    match list {
+        "actions" => &["name", "key", "prompt", "output", "backend", "model"],
+        _ => &["name", "key", "suffix"],
+    }
+}
+
+/// Set fields of the entry `id` in `list` ("actions" or "modifiers"),
+/// copying the built-in list into the file first if needed. An empty `key`,
+/// `backend` or `model` removes it; a key is one character the popup does
+/// not reserve. Duplicate keys are caught when the file is checked
+/// ([`Config::edit_file`]).
+pub fn patch_entry(
+    doc: &mut toml_edit::DocumentMut,
+    list: &str,
+    id: &str,
+    patch: &BTreeMap<String, String>,
+) -> Result<()> {
+    let aot = list_of(doc, list, true)?;
+    let i = index_of(aot, list, id)?;
+    let t = aot.get_mut(i).expect("index_of found it");
+    for (field, value) in patch {
+        let field = field.as_str();
+        if !fields(list).contains(&field) {
+            anyhow::bail!("{list} have no `{field}` to set here");
+        }
+        let mut value = value.clone();
+        if field != "prompt" && field != "suffix" {
+            value = value.trim().to_string();
+        }
+        if field == "key" {
+            value = value.to_lowercase();
+            if value.chars().count() > 1 {
+                anyhow::bail!("a key is a single character");
+            }
+            if RESERVED_KEYS.contains(&value.as_str()) {
+                anyhow::bail!("key \"{value}\" is reserved by the popup");
+            }
+        }
+        match field {
+            "key" | "backend" | "model" if value.is_empty() => {
+                t.remove(field);
+            }
+            _ if value.trim().is_empty() => anyhow::bail!("`{field}` cannot be empty"),
+            _ => put(t, field, value.into()),
+        }
+    }
+    Ok(())
+}
+
+/// Move the entry `id` `delta` places in `list` (the order of the chips),
+/// stopping at either end. Each place keeps its comments.
+pub fn move_entry(
+    doc: &mut toml_edit::DocumentMut,
+    list: &str,
+    id: &str,
+    delta: isize,
+) -> Result<()> {
+    let aot = list_of(doc, list, true)?;
+    let i = index_of(aot, list, id)?;
+    let j = i.saturating_add_signed(delta).min(aot.len() - 1);
+    if i == j {
+        return Ok(());
+    }
+    let places: Vec<_> = aot
+        .iter()
+        .map(|t| (t.position(), t.decor().clone()))
+        .collect();
+    let mut tables: Vec<toml_edit::Table> = aot.iter().cloned().collect();
+    let t = tables.remove(i);
+    tables.insert(j, t);
+    aot.clear();
+    for (mut t, (pos, decor)) in tables.into_iter().zip(places) {
+        if let Some(p) = pos {
+            t.set_position(p);
+        }
+        *t.decor_mut() = decor;
+        aot.push(t);
+    }
+    Ok(())
+}
+
+/// Give the built-in entry `id` its default name, key, prompt / suffix and
+/// output back (an action keeps its `backend` and `model`).
+pub fn reset_entry(doc: &mut toml_edit::DocumentMut, list: &str, id: &str) -> Result<()> {
+    let default = default_entries(list)?
+        .into_iter()
+        .find(|t| id_of(t) == Some(id))
+        .with_context(|| format!("`{id}` is not a built-in {}", noun(list)))?;
+    let aot = list_of(doc, list, true)?;
+    let i = index_of(aot, list, id)?;
+    let t = aot.get_mut(i).expect("index_of found it");
+    for f in fields(list) {
+        if matches!(*f, "backend" | "model") {
+            continue;
+        }
+        match default.get(f).and_then(|i| i.as_value()) {
+            Some(v) => put(t, f, v.clone()),
+            None => {
+                t.remove(f);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Remove the entry `id` from the file's `list`. Built-in entries stay (edit
+/// the file to drop those).
+pub fn remove_entry(doc: &mut toml_edit::DocumentMut, list: &str, id: &str) -> Result<()> {
+    if default_entries(list)?.iter().any(|t| id_of(t) == Some(id)) {
+        anyhow::bail!(
+            "`{id}` is a built-in {}; it cannot be removed here",
+            noun(list)
+        );
+    }
+    let not_found = || format!("no {} `{id}` in the config file", noun(list));
+    let aot = list_of(doc, list, false).with_context(not_found)?;
+    let i = index_of(aot, list, id)?;
+    aot.remove(i);
+    Ok(())
 }
 
 /// Remove the action `id` from the file. Built-in actions and the default
@@ -606,17 +817,7 @@ pub fn remove_action_from(
     if id == default_action {
         anyhow::bail!("`{id}` is general.default_action; it cannot be removed");
     }
-    if default_actions().iter().any(|a| a.id == id) {
-        anyhow::bail!("`{id}` is a built-in action; it cannot be removed here");
-    }
-    let actions =
-        actions_of(doc, false).with_context(|| format!("no action `{id}` in the config file"))?;
-    let i = actions
-        .iter()
-        .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(id))
-        .with_context(|| format!("no action `{id}` in the config file"))?;
-    actions.remove(i);
-    Ok(())
+    remove_entry(doc, "actions", id)
 }
 
 #[cfg(test)]
@@ -732,6 +933,139 @@ mod tests {
         }
         let mut empty = toml_edit::DocumentMut::new();
         assert!(remove_action_from(&mut empty, "nope", "fix").is_err());
+    }
+
+    #[test]
+    fn typed_values_keep_their_type_and_comments() {
+        let mut out = DEFAULT_CONFIG.to_string();
+        let json = |s: &str| toml_value(&serde_json::from_str(s).unwrap()).unwrap();
+        for (path, v) in [
+            (&["general", "auto_paste"][..], "false"),
+            (&["provider", "max_tokens"], "2048"),
+            (&["provider", "temperature"], "1"),
+            (&["translate", "targets"], r#"["en", "fr"]"#),
+        ] {
+            out = set_toml_value(&out, path, json(v)).unwrap();
+        }
+        assert_eq!(out.lines().count(), DEFAULT_CONFIG.lines().count());
+        assert!(out.contains("# Replace the selection with the result automatically"));
+        assert!(out.contains("\nauto_paste = false\n"), "{out}");
+        assert!(out.contains("\nmax_tokens = 2048\n"), "{out}");
+        let c = Config::from_user_toml(&out).unwrap();
+        assert!(!c.general.auto_paste);
+        assert_eq!(c.provider.max_tokens, 2048);
+        assert_eq!(c.provider.temperature, 1.0);
+        assert_eq!(c.translate.targets, ["en", "fr"]);
+        assert!(toml_value(&serde_json::json!({"a": 1})).is_err());
+        assert!(toml_value(&serde_json::json!([1])).is_err());
+        // A string where a number belongs does not load.
+        let bad = set_toml_value(&out, &["provider", "max_tokens"], "many").unwrap();
+        assert!(Config::from_user_toml(&bad).is_err());
+    }
+
+    #[test]
+    fn edit_entries_in_place() {
+        let patch = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        // No [[actions]] in the file: the built-in ones are copied in first.
+        let head = "# mine\n[general]\nauto_paste = false # off\n";
+        let mut doc: toml_edit::DocumentMut = head.parse().unwrap();
+        let p = patch(&[("name", " Polish "), ("key", "9"), ("backend", "ollama")]);
+        patch_entry(&mut doc, "actions", "improve", &p).unwrap();
+        let out = doc.to_string();
+        assert!(out.starts_with(head), "{out}");
+        let c = Config::from_user_toml(&out).unwrap();
+        assert_eq!(c.actions.len(), default_actions().len());
+        let a = c.action("improve").unwrap();
+        assert_eq!((a.name.as_str(), a.key.as_str()), ("Polish", "9"));
+        assert_eq!(a.backend.as_deref(), Some("ollama"));
+        patch_entry(&mut doc, "actions", "improve", &patch(&[("backend", "")])).unwrap();
+        let c = Config::from_user_toml(&doc.to_string()).unwrap();
+        assert_eq!(c.action("improve").unwrap().backend, None);
+
+        // Reserved, long and empty values are refused with a message; a
+        // duplicate key fails the check the file must pass before it is saved.
+        for (p, msg) in [
+            (patch(&[("key", "R")]), "key \"r\" is reserved by the popup"),
+            (patch(&[("key", "ab")]), "a key is a single character"),
+            (patch(&[("name", " ")]), "`name` cannot be empty"),
+            (patch(&[("id", "x")]), "actions have no `id` to set here"),
+        ] {
+            let e = patch_entry(&mut doc, "actions", "fix", &p).unwrap_err();
+            assert_eq!(e.to_string(), msg);
+        }
+        assert!(patch_entry(&mut doc, "actions", "nope", &patch(&[])).is_err());
+        let mut dup = doc.clone();
+        patch_entry(&mut dup, "actions", "fix", &patch(&[("key", "3")])).unwrap();
+        let e = Config::from_user_toml(&dup.to_string()).unwrap_err();
+        assert_eq!(e.to_string(), "duplicate action key \"3\"");
+
+        // Reset puts the defaults back; backend and model stay.
+        let p = patch(&[("prompt", "x"), ("output", "show"), ("model", "m")]);
+        patch_entry(&mut doc, "actions", "fix", &p).unwrap();
+        reset_entry(&mut doc, "actions", "fix").unwrap();
+        reset_entry(&mut doc, "actions", "improve").unwrap();
+        let c = Config::from_user_toml(&doc.to_string()).unwrap();
+        let (fix, def) = (c.action("fix").unwrap(), &default_actions()[0]);
+        assert_eq!(
+            (&fix.name, &fix.key, &fix.prompt, fix.output),
+            (&def.name, &def.key, &def.prompt, def.output)
+        );
+        assert_eq!(fix.model.as_deref(), Some("m"));
+        assert_eq!(c.action("improve").unwrap().name, "Improve");
+        let id = add_action_to(&mut doc, "Be nice").unwrap();
+        assert!(reset_entry(&mut doc, "actions", &id).is_err());
+
+        // A built-in modifier copied into the file loses a key your action uses.
+        let mut doc: toml_edit::DocumentMut =
+            "[[actions]]\nid = \"a\"\nname = \"A\"\nkey = \"w\"\nprompt = \"p\"\n"
+                .parse()
+                .unwrap();
+        patch_entry(
+            &mut doc,
+            "modifiers",
+            "shorter",
+            &patch(&[("name", "Short")]),
+        )
+        .unwrap();
+        let c = Config::from_user_toml(&doc.to_string()).unwrap();
+        assert_eq!(c.modifiers[0].name, "Short");
+        assert_eq!(
+            c.modifiers.iter().find(|m| m.id == "warmer").unwrap().key,
+            ""
+        );
+        let id = add_modifier_to(&mut doc).unwrap();
+        assert_eq!(id, "custom");
+        assert_eq!(add_modifier_to(&mut doc).unwrap(), "custom-2");
+        let c = Config::from_user_toml(&doc.to_string()).unwrap();
+        assert_eq!(c.modifiers.len(), default_modifiers().len() + 2);
+        remove_entry(&mut doc, "modifiers", &id).unwrap();
+        assert!(remove_entry(&mut doc, "modifiers", "warmer").is_err());
+    }
+
+    #[test]
+    fn move_entries_round_trip() {
+        let mut doc: toml_edit::DocumentMut = DEFAULT_CONFIG.parse().unwrap();
+        let ids = |doc: &toml_edit::DocumentMut| -> Vec<String> {
+            let c = Config::from_user_toml(&doc.to_string()).unwrap();
+            c.actions.into_iter().map(|a| a.id).collect()
+        };
+        move_entry(&mut doc, "actions", "fix", 1).unwrap();
+        assert_eq!(ids(&doc)[..3], ["improve", "fix", "concise"]);
+        move_entry(&mut doc, "actions", "fix", -1).unwrap();
+        assert_eq!(doc.to_string(), DEFAULT_CONFIG);
+        // Clamped at the ends; a long move shifts the rest up.
+        move_entry(&mut doc, "actions", "fix", -5).unwrap();
+        assert_eq!(doc.to_string(), DEFAULT_CONFIG);
+        move_entry(&mut doc, "actions", "fix", 99).unwrap();
+        assert_eq!(ids(&doc).last().unwrap(), "fix");
+        assert_eq!(ids(&doc)[0], "improve");
+        move_entry(&mut doc, "actions", "fix", -99).unwrap();
+        assert_eq!(doc.to_string(), DEFAULT_CONFIG);
     }
 
     #[test]
