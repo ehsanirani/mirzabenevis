@@ -58,6 +58,13 @@
     <div id="pickerList"></div>
     <p class="picker-hint">↑↓ Enter choose · type a model, Enter saves · Esc close</p>
   </dialog>
+  <dialog id="settings" aria-label="Settings">
+    <div class="settings">
+      <div id="setTabs" class="set-tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections"></div>
+      <div id="setPane" class="set-pane" role="tabpanel"></div>
+    </div>
+    <p class="picker-hint"><span id="setStatus" role="status"></span> Changes are saved to config.toml as you make them · Esc close</p>
+  </dialog>
   <script src="diff.js"></script>
   <script src="md.js"></script>
   <script src="main.js"></script>

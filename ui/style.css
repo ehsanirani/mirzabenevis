@@ -295,7 +295,7 @@ html, body {
 .backend.error { color: var(--error); border-color: var(--error); }
 .backend:hover { border-color: var(--accent); color: var(--ink); }
 
-#picker {
+#picker, #settings {
   width: min(560px, calc(92vw / var(--z, 1)));
   max-height: calc(80vh / var(--z, 1));
   padding: 6px;
@@ -305,7 +305,48 @@ html, body {
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .3);
 }
-#picker::backdrop { background: rgba(0, 0, 0, .2); }
+#picker::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .2); }
+
+/* Settings: tabs on the left, the fields of one tab on the right. */
+#settings { width: min(760px, calc(94vw / var(--z, 1))); height: calc(86vh / var(--z, 1)); max-height: none; }
+#settings[open] { display: flex; flex-direction: column; }
+.settings { flex: 1; min-height: 0; display: flex; gap: 8px; }
+.set-tabs { flex: none; width: 116px; display: flex; flex-direction: column; gap: 2px; padding: 2px 6px 2px 0; border-right: 1px solid var(--line); }
+.set-tab { padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.set-tab:hover { background: var(--bg); }
+.set-tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.set-pane { flex: 1; min-width: 0; overflow: auto; padding: 2px 6px 2px 2px; }
+.set-pane > .field { max-width: 30em; }
+.set-pane > .note { margin: 0 0 8px; }
+.set-pane > .lbtn { margin-bottom: 10px; }
+.set-row { display: flex; gap: 4px; }
+.field { display: flex; flex-direction: column; gap: 2px; margin: 0 0 10px; min-width: 0; }
+.flabel { color: var(--muted); font: 600 11px var(--mono); letter-spacing: .04em; }
+.field.check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.field.check .flabel { order: 1; color: var(--ink); font: inherit; letter-spacing: 0; }
+.field.check .note, .field.check .err { order: 2; flex-basis: 100%; }
+.field input:not([type="checkbox"]), .field select, .field textarea {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+.field textarea { resize: vertical; font: 12px/1.4 var(--mono); }
+.field input[readonly] { color: var(--muted); font: 12px var(--mono); }
+.field .bad { border-color: var(--error); outline-color: var(--error); }
+.note { color: var(--muted); font-size: 11px; }
+.err { color: var(--error); font-size: 11px; }
+.err:empty { display: none; }
+#setStatus:not(:empty)::after { content: " ·"; }
+.entry { margin: 0 0 10px; padding: 4px 10px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.entry legend { padding: 0 4px; color: var(--muted); font: 11px var(--mono); }
+.entry .field { margin-bottom: 6px; }
+.entry-grid { display: grid; grid-template-columns: 2fr 3.2em 1.3fr 1.5fr 1.5fr; gap: 0 8px; }
+.entry-btns { display: flex; justify-content: flex-end; }
+.lbtn:disabled { opacity: .4; cursor: default; }
 .menu {
   position: fixed;
   z-index: 10;

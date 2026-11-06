@@ -358,6 +358,263 @@ async function pickerCall(cmd, args, done) {
 const chooseBackend = (id) => pickerCall("set_backend", { id }, "Backend saved");
 const saveModel = (id, model) => pickerCall("set_model", { id, model }, model.trim() ? `${id} now uses ${model.trim()}` : `${id} uses its default model`);
 
+// Settings (☰ → Settings…, Ctrl+,). A field saves to config.toml when it changes; Rust
+// checks that the file still loads before writing it. A refused value stays red with the reason.
+const settings = $("settings");
+const setPane = $("setPane");
+const NEW_PROMPT = "Rewrite this text so that …";
+let sv = null; // the last get_settings answer
+let setTab = "General";
+let settingsOpener = null;
+
+function setMsg(msg, isError = false) {
+  const s = $("setStatus");
+  s.textContent = msg;
+  s.style.color = isError ? "var(--error)" : "";
+}
+function bad(input, msg) {
+  input.classList.add("bad");
+  input.closest(".field").querySelector(".err").textContent = msg;
+  setMsg(`Not saved: ${msg}`, true);
+}
+
+// Run a settings command; on success the page (`rerender`) and the popup show the new config.
+async function settingsCall(cmd, args, input, rerender = false) {
+  try {
+    const v = await invoke(cmd, args);
+    sv = Array.isArray(v) ? await invoke("get_settings") : v; // add/remove_action answer with chips
+  } catch (e) {
+    if (input) bad(input, String(e));
+    else setMsg(String(e), true);
+    if (!settings.open) setStatus(`Settings: ${e}`, true); // saved on the way out (Esc)
+    return false;
+  }
+  if (input) {
+    input.classList.remove("bad");
+    input.closest(".field").querySelector(".err").textContent = "";
+  }
+  setMsg("Saved");
+  await refreshPopup().catch(() => {});
+  if (rerender) renderSettings();
+  return true;
+}
+
+const textIn = (value, attrs) => Object.assign(el("input"), { type: "text", spellcheck: false, value: value ?? "" }, attrs);
+const numIn = (value, attrs) => Object.assign(el("input"), { type: "number", value }, attrs);
+const checkIn = (checked) => Object.assign(el("input"), { type: "checkbox", checked });
+function selectIn(value, options) {
+  const s = el("select");
+  s.append(...options.map(([v, label]) => Object.assign(el("option", "", label), { value: v })));
+  s.value = value ?? "";
+  return s;
+}
+function smallBtn(label, title, fn, disabled = false) {
+  const b = el("button", "lbtn", label);
+  b.type = "button";
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.disabled = disabled;
+  b.addEventListener("click", fn);
+  return b;
+}
+
+// A labelled control; `save(value, input)` runs when it changes.
+function field(label, input, save, note) {
+  const w = el("label", input.type === "checkbox" ? "field check" : "field");
+  input.dataset.f ||= label; // focus survives a re-render
+  w.append(el("span", "flabel", label), input);
+  if (note) w.append(el("small", "note", note));
+  w.append(el("small", "err"));
+  if (save) {
+    input.addEventListener("change", () => save(input.type === "checkbox" ? input.checked
+      : input.type === "number" ? input.valueAsNumber : input.value, input));
+  }
+  return w;
+}
+const setting = (path) => (value, input) => (typeof value === "number" && !Number.isFinite(value)
+  ? bad(input, "Enter a number")
+  : settingsCall("set_setting", { path: path.split("."), value }, input));
+
+// Client-side check of a key; Rust checks again (reserved and duplicate keys).
+function keyProblem(key, kind, id) {
+  const k = key.trim().toLowerCase();
+  if (!k) return "";
+  if ([...k].length > 1) return "A key is a single character";
+  if (sv.reserved.includes(k)) return `"${k}" is used by the popup itself`;
+  const a = sv.actions.find((x) => x.key === k && !(kind === "action" && x.id === id));
+  if (a) return `"${k}" is taken by the action ${a.name}`;
+  const m = sv.modifiers.find((x) => x.key === k && !(kind === "modifier" && x.id === id));
+  return m ? `"${k}" is taken by the modifier ${m.name}` : "";
+}
+
+// The backends found on this machine (from the picker's last answer), blank = auto.
+function backendOptions(current) {
+  const opts = [["", "Auto"], ...(view?.found || []).map((b) => [b.id, b.label])];
+  if (current && !opts.some(([id]) => id === current)) opts.push([current, `${current} (not found)`]);
+  return opts;
+}
+
+// One action or modifier: fields save on change; buttons move, reset or remove it.
+function entryCard(kind, e, i, list) {
+  const isAction = kind === "action";
+  const card = el("fieldset", "entry");
+  card.append(el("legend", "", e.builtin ? `${e.id} · built in` : e.id));
+  const input = (control, k, label) => {
+    control.dataset.f = `${kind}:${e.id}:${k}`;
+    control.setAttribute("aria-label", `${label} of ${kind} ${e.id}`);
+    return control;
+  };
+  const patch = (k) => (v, control) => {
+    const problem = k === "key" && keyProblem(v, kind, e.id);
+    if (problem) return bad(control, problem);
+    settingsCall(isAction ? "set_action" : "set_modifier", { id: e.id, patch: { [k]: v } }, control);
+  };
+  const grid = el("div", "entry-grid");
+  grid.append(
+    field("Name", input(textIn(e.name), "name", "Name"), patch("name")),
+    field("Key", input(textIn(e.key, { maxLength: 1 }), "key", "Key"), patch("key")),
+  );
+  if (isAction) {
+    grid.append(
+      field("Output", input(selectIn(e.output, [["replace", "Replace"], ["clipboard", "Copy"], ["show", "Show only"]]), "output", "Output"), patch("output")),
+      field("Backend", input(selectIn(e.backend || "", backendOptions(e.backend)), "backend", "Backend"), patch("backend")),
+      field("Model", input(textIn(e.model, { placeholder: "default" }), "model", "Model"), patch("model")),
+    );
+  }
+  const long = Object.assign(el("textarea"), { value: isAction ? e.prompt : e.suffix, rows: isAction ? 3 : 1, spellcheck: false });
+  const btns = el("div", "entry-btns");
+  const cmd = (verb) => `${verb}_${kind}`;
+  if (isAction) {
+    btns.append(
+      smallBtn("↑", `Move ${e.name} up`, () => settingsCall("move_action", { id: e.id, delta: -1 }, null, true), i === 0),
+      smallBtn("↓", `Move ${e.name} down`, () => settingsCall("move_action", { id: e.id, delta: 1 }, null, true), i === list.length - 1),
+    );
+  }
+  btns.append(e.builtin
+    ? smallBtn("Reset to default", `Reset ${e.name} to its default name, key, ${isAction ? "prompt and output" : "and instruction"}`, () => settingsCall(cmd("reset"), { id: e.id }, null, true))
+    : smallBtn("Remove", `Remove ${e.name}`, () => settingsCall(cmd("remove"), { id: e.id }, null, true)));
+  btns.querySelectorAll("button").forEach((b, n) => (b.dataset.f = `${kind}:${e.id}:btn${n}`));
+  card.append(grid, field(isAction ? "Prompt ({text} = the selection)" : "Instruction added to the run",
+    input(long, isAction ? "prompt" : "suffix", isAction ? "Prompt" : "Instruction"), patch(isAction ? "prompt" : "suffix")), btns);
+  return card;
+}
+
+// Add one, then put the cursor in its prompt (action) or name (modifier).
+async function addEntry(cmd, args, selector) {
+  if (!(await settingsCall(cmd, args, null, true))) return;
+  const f = [...setPane.querySelectorAll(selector)].at(-1);
+  f?.focus();
+  f?.select();
+}
+
+const TABS = {
+  General: () => {
+    const g = sv.general;
+    return [
+      field("Default action (Enter)", selectIn(g.default_action, sv.actions.map((a) => [a.id, a.name])), setting("general.default_action")),
+      field("Replace the selection automatically", checkIn(g.auto_paste), setting("general.auto_paste"), "Off: Enter copies the result instead"),
+      field("Paste by", selectIn(sv.paste, [["clipboard", "Clipboard + Ctrl+V"], ["type", "Typing the text"]]), setting("linux.paste")),
+      field("Keep a history (undo, recent instructions)", checkIn(g.history), setting("general.history")),
+      field("Desktop notifications (CLI)", checkIn(g.notify), setting("general.notify")),
+      field("Explanations in", textIn(g.explain_in, { placeholder: "the language of the text" }), setting("general.explain_in"), "Language of Explain and X, e.g. fa or German"),
+    ];
+  },
+  Actions: () => [
+    el("p", "note", "The order here is the order of the chips. Built-in actions can be reset, your own removed."),
+    smallBtn("+ Add action", "Add an action", () => addEntry("add_action", { prompt: NEW_PROMPT }, ".entry textarea")),
+    ...sv.actions.map((a, i, list) => entryCard("action", a, i, list)),
+  ],
+  Modifiers: () => [
+    el("p", "note", "Toggles under the chips: the instruction is added to the next run."),
+    smallBtn("+ Add modifier", "Add a modifier", () => addEntry("add_modifier", {}, ".entry input[data-f$=':name']")),
+    ...sv.modifiers.map((m, i, list) => entryCard("modifier", m, i, list)),
+  ],
+  Translate: () => {
+    const t = sv.translate;
+    const targets = t.targets.includes(t.target) ? t.targets : [...t.targets, t.target];
+    return [
+      field("Translate into", selectIn(t.target, targets.map((x) => [x, x])), setting("translate.target"), "T in the popup switches to the next one"),
+      field("Languages", textIn(t.targets.join(", ")), (v, input) => {
+        const list = v.split(",").map((x) => x.trim()).filter(Boolean);
+        if (!list.length) return bad(input, "List at least one language");
+        settingsCall("set_setting", { path: ["translate", "targets"], value: list }, input, true);
+      }, "ISO 639-1 codes, comma-separated, e.g. en, de, fa"),
+    ];
+  },
+  Advanced: () => {
+    const row = el("div", "set-row");
+    row.append(
+      smallBtn("Open config.toml", "Open config.toml in your editor", async () => {
+        try { setMsg(`Opened ${await invoke("open_config")} — Reload after editing`); }
+        catch (e) { setMsg(String(e), true); }
+      }),
+      smallBtn("Reload", "Read config.toml again", async () => {
+        try { await reloadConfig(); sv = await invoke("get_settings"); renderSettings(); setMsg("Reloaded"); }
+        catch (e) { setMsg(String(e), true); }
+      }),
+    );
+    return [
+      field("Max tokens per answer", numIn(sv.max_tokens, { min: 1, step: 1 }), setting("provider.max_tokens")),
+      field("Temperature", numIn(sv.temperature, { min: 0, max: 2, step: 0.1 }), setting("provider.temperature"), "Only sent to backends that accept it"),
+      field("Timeout (seconds)", numIn(sv.timeout_secs, { min: 1, step: 1 }), setting("provider.timeout_secs")),
+      field("Longest input (characters)", numIn(sv.general.max_input_chars, { min: 1, step: 1 }), setting("general.max_input_chars")),
+      field("Global hotkey", textIn(sv.general.hotkey, { placeholder: "e.g. Ctrl+Space" }), setting("general.hotkey"),
+        "X11 only, used after a restart. On Wayland bind mirzabenevis --popup in your desktop's keyboard settings"),
+      field("Config file", textIn(sv.config_path, { readOnly: true })),
+      row,
+    ];
+  },
+};
+
+function renderSettings() {
+  const f = document.activeElement?.dataset?.f;
+  $("setTabs").replaceChildren(...Object.keys(TABS).map((name) => {
+    const b = el("button", "set-tab", name);
+    b.type = "button";
+    b.dataset.f = `tab:${name}`;
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(name === setTab));
+    b.tabIndex = name === setTab ? 0 : -1;
+    b.addEventListener("click", () => {
+      setTab = name;
+      renderSettings();
+    });
+    return b;
+  }));
+  setPane.setAttribute("aria-label", setTab);
+  setPane.replaceChildren(...TABS[setTab]());
+  setPane.scrollTop = f?.startsWith("tab:") ? 0 : setPane.scrollTop;
+  // A button that became disabled (↑ at the top) hands focus to its neighbour.
+  const back = f && settings.querySelector(`[data-f="${CSS.escape(f)}"]`);
+  (back?.disabled ? back.parentElement.querySelector("button:not(:disabled)") : back)?.focus();
+}
+$("setTabs").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const names = Object.keys(TABS);
+  setTab = names[(names.indexOf(setTab) + (e.key === "ArrowDown" ? 1 : -1) + names.length) % names.length];
+  renderSettings();
+  settings.querySelector(`[data-f="tab:${setTab}"]`).focus();
+});
+
+async function openSettings() {
+  if (settings.open) return;
+  try {
+    sv = await invoke("get_settings");
+  } catch (e) {
+    return setStatus(String(e), true);
+  }
+  settingsOpener = document.activeElement;
+  setMsg("");
+  renderSettings();
+  settings.showModal();
+  settings.querySelector(`[data-f="tab:${setTab}"]`).focus();
+}
+// Esc: save what is being typed (change fires on blur) before the dialog goes.
+settings.addEventListener("cancel", () => document.activeElement?.blur());
+settings.addEventListener("close", () => (settingsOpener?.isConnected && settingsOpener !== document.body ? settingsOpener.focus() : home()));
+settings.addEventListener("click", (e) => e.target === settings && settings.close()); // the backdrop
+
 function chip(key, label, title, cls, onClick) {
   const b = document.createElement("button");
   b.className = "action" + cls;
@@ -399,7 +656,7 @@ function openChipMenu(a, x, y) {
   if (!a.builtin) items.push(el("div", "sep"), menuItem(`Remove "${a.name}"`, () => removeAction(a), "danger"));
   openMenu(items, x, y);
 }
-// App menu (☰): about, config, quit. Settings = the config file; no second UI for it.
+// App menu (☰): about, settings, config, quit.
 let about = ""; // Markdown shown in the result pane until the next run / open
 async function showAbout() {
   const i = await invoke("app_info");
@@ -410,7 +667,7 @@ async function showAbout() {
     `- Config: \`${i.config_path}\``,
     "- Help: `mirzabenevis-cli doctor` checks your desktop setup",
     "",
-    "Keys: numbers run actions · / instruction · D diff · X what changed · U undo · M backend · P pin · Esc close",
+    "Keys: numbers run actions · / instruction · D diff · X what changed · U undo · M backend · P pin · Ctrl+, settings · Esc close",
   ].join("\n");
   renderResult();
   // Clickable links (the Markdown renderer deliberately has none).
@@ -427,12 +684,13 @@ async function showAbout() {
 function openAppMenu(x, y) {
   openMenu([
     menuItem("About", showAbout),
+    menuItem("Settings…", openSettings),
     menuItem("Open config.toml", async () => {
       try { setStatus(`Opened ${await invoke("open_config")} — Reload config after editing`); }
       catch (e) { setStatus(String(e), true); }
     }),
     menuItem("Reload config", async () => {
-      try { await invoke("reload_config"); actions = await invoke("get_actions"); renderActions(); loadBackends(true); setStatus("Config reloaded"); }
+      try { await reloadConfig(); setStatus("Config reloaded"); }
       catch (e) { setStatus(String(e), true); }
     }),
     el("div", "sep"),
@@ -554,8 +812,33 @@ original.addEventListener("input", () => {
   sync();
 });
 
+// What get_info says about the config.
+function applyInfo(info) {
+  defaultAction = info.default_action;
+  explainIn = info.explain_in;
+  pasteHow = info.paste;
+  target = info.target;
+  maxChars = info.max_input_chars;
+  modifiers = info.modifiers;
+}
+// Chips, modifiers and the translate label follow a changed config.
+async function refreshPopup() {
+  actions = await invoke("get_actions");
+  applyInfo(await invoke("get_info"));
+  if (!actions.some((a) => a.id === active)) active = defaultAction;
+  renderActions();
+  renderModifiers();
+  if (!running) renderResult();
+}
+async function reloadConfig() {
+  await invoke("reload_config");
+  await refreshPopup();
+  loadBackends(true);
+}
+
 async function onShown() {
   if (picker.open) picker.close();
+  if (settings.open) settings.close();
   const shown = ++runId; // forget whatever was running when the popup was last open
   running = false;
   about = "";
@@ -571,13 +854,8 @@ async function onShown() {
   loadRecents();
   grabStatus = ["", false];
   setStatus("");
-  const info = await invoke("get_info");
-  active = defaultAction = info.default_action;
-  explainIn = info.explain_in;
-  pasteHow = info.paste;
-  target = info.target;
-  maxChars = info.max_input_chars;
-  modifiers = info.modifiers;
+  applyInfo(await invoke("get_info"));
+  active = defaultAction;
   renderActions();
   renderModifiers();
   renderResult();
@@ -891,9 +1169,13 @@ function lookup(e) {
 document.addEventListener("keydown", (e) => {
   if (e.altKey || e.metaKey || e.isComposing) return;
   const t = document.activeElement;
-  if (t.closest("dialog")) return; // the backend picker handles its own keys (Esc closes it)
+  if (t.closest("dialog") || picker.open || settings.open) return; // the backend picker and settings handle their own keys (Esc closes them)
   if (!chipMenu.hidden) { if (e.key === "Escape") { e.preventDefault(); closeChipMenu(); home(); } return; }
   if (e.ctrlKey) {
+    if (e.key === "," || e.code === "Comma") {
+      e.preventDefault();
+      return openSettings();
+    }
     // Zoom: Ctrl+= (or +), Ctrl+-, Ctrl+0; by physical key too, for other layouts.
     const z = e.key === "=" || e.key === "+" || e.code === "Equal" || e.code === "NumpadAdd" ? 0.1
       : e.key === "-" || e.code === "Minus" || e.code === "NumpadSubtract" ? -0.1
