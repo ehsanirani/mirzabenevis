@@ -648,6 +648,19 @@ pub fn reset_section(doc: &mut toml_edit::DocumentMut, section: &str) -> Result<
             t.remove(last);
         }
     }
+    // Resetting the action list may delete the action Enter points at.
+    if matches!(section, "actions" | "everything") {
+        let dangling = doc
+            .get("general")
+            .and_then(|g| g.get("default_action"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| !default_actions().iter().any(|a| a.id == id));
+        if dangling {
+            if let Some(g) = doc.get_mut("general").and_then(|i| i.as_table_mut()) {
+                g.remove("default_action");
+            }
+        }
+    }
     Ok(())
 }
 
