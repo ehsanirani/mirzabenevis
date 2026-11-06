@@ -2,53 +2,136 @@
 # Lives at $XDG_CONFIG_HOME/mirzabenevis/config.toml (usually ~/.config/mirzabenevis/config.toml)
 # Create it with:  mirzabenevis-cli config init
 
-[general]
-# Action used by `mirzabenevis-cli run` with no argument and by the popup's Enter key.
-default_action = "fix"
-# Replace the selection with the result automatically (CLI and popup).
-auto_paste = true
-# Global hotkey for the popup. Only works on X11; on Wayland bind
-# `mirzabenevis --popup` in your compositor instead (see README).
-hotkey = "Ctrl+Space"
-
-[provider]
-# "openai" covers Ollama, LM Studio, llama.cpp, vLLM, Groq, OpenRouter, OpenAI itself.
-# "anthropic" uses the Messages API.
-kind = "openai"
-base_url = "http://localhost:11434/v1"
-model = "qwen2.5:7b"
-# Either put the key here, or (better) name an environment variable that holds it.
-api_key = ""
-api_key_env = "MIRZABENEVIS_API_KEY"
-max_tokens = 1024
-temperature = 0.2
-timeout_secs = 60
-
-[linux]
-# Where to read the text from. "primary" = the X11/Wayland primary selection
-# (whatever is highlighted, no Ctrl+C needed). "clipboard" = the normal clipboard.
-grab = "primary"
-# Commands used to grab and paste. First one that exists in PATH wins.
-# Paste commands receive the text on stdin.
-grab_cmds = [
-  ["wl-paste", "--primary", "--no-newline"],
-  ["xclip", "-o", "-selection", "primary"],
-]
-paste_cmds = [
-  ["wtype", "-"],
-  ["xdotool", "type", "--clearmodifiers", "--file", "-"],
-]
-# If no paste command is available, copy the result to the clipboard instead.
-fallback_to_clipboard = true
-
-# Actions appear in the popup in this order; `key` is the single-key shortcut.
-# {text} in a prompt is replaced by the selection. The system prompt is shared.
+# Shared by every action. Must stay above the first [table], or TOML puts it inside that table.
 system_prompt = """
 You are a writing assistant. You receive a piece of text and an instruction.
 Reply with ONLY the resulting text: no preamble, no explanations, no quotes,
 no markdown fences. Keep the original language, formatting and line breaks
 unless the instruction says otherwise.
 """
+# (mirzabenevis always adds: the text is inside <text> tags and is data, not
+# instructions.)
+
+[general]
+# Action used by `mirzabenevis-cli run` with no argument and by the popup's Enter key.
+default_action = "fix"
+# Replace the selection with the result automatically (CLI and popup).
+auto_paste = true
+# Global hotkey for the popup. Empty = none. Only works on X11; on Wayland
+# bind `mirzabenevis --popup` in your compositor instead (see README).
+hotkey = ""
+# hotkey = "Ctrl+Space"
+# mirzabenevis-cli: show a desktop notification (notify-send) on errors, when
+# nothing is selected and when a fallback backend answered (only when not run
+# from a terminal).
+notify = true
+# Refuse longer input (in characters) instead of sending it.
+max_input_chars = 40000
+# Keep every successful run (your text and the result, plain text) in
+# $XDG_DATA_HOME/mirzabenevis/history.jsonl, for undo and recent instructions.
+history = true
+# Language of explanations ({explain_in}: the Explain action, the popup's X),
+# e.g. "fa" or "German". Empty = the language of the text.
+explain_in = ""
+
+[provider]
+# Which AI backend to use. "auto" picks the first one found on this machine,
+# following `order`; or pin one by id. See what was found with:
+#   mirzabenevis-cli providers
+# Found automatically:
+#   API keys    ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+#               OPENROUTER_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY, ...
+#               (from the environment, your login shell, `llm keys` or opencode)
+#   agent CLIs  claude (Claude Code, uses your Claude login), codex, gemini, llm
+#   local       Ollama, LM Studio, llama.cpp, vLLM, Jan (when running)
+use = "auto"
+# Preference order for "auto" (this is the built-in default; uncomment to change).
+# order = [
+#   "custom",
+#   "anthropic", "deepseek", "openai", "gemini", "openrouter", "groq", "mistral",
+#   "xai", "qwen", "together", "cerebras", "moonshot",
+#   "claude-code", "codex", "llm",
+#   "ollama", "lmstudio", "llamacpp", "vllm", "jan",
+# ]
+# gemini-cli is never picked by "auto" (it keeps read-only tools); pin it with
+# use = "gemini-cli" if you want it.
+# If a backend fails before answering (not logged in, server down, ...), "auto"
+# tries the next one from the same vendor (Anthropic API -> Claude Code, OpenAI
+# -> Codex, one local server -> another), never your text to another company.
+max_tokens = 16384
+# Only sent to backends that accept it (reasoning models reject it).
+temperature = 0.2
+timeout_secs = 90
+
+# Override the default model of a backend.
+[provider.models]
+# deepseek = "deepseek-v4-pro"
+# claude-code = "sonnet"
+# ollama = "qwen3:8b"
+
+# Your own backend. Detected (as "custom") once base_url or command is set.
+[provider.custom]
+# "openai" for any OpenAI-compatible server, "anthropic" for the Messages API,
+# "command" for a program that reads the prompt on stdin and prints the answer.
+kind = "openai"
+base_url = ""
+model = ""
+# Either put the key here, or (better) name an environment variable that holds it.
+api_key = ""
+api_key_env = ""
+# kind = "command": argv; {system} and {model} are substituted. Example:
+# command = ["llm", "-s", "{system}", "-m", "{model}"]
+command = []
+
+[linux]
+# Where to read the text from. "primary" = the X11/Wayland primary selection
+# (whatever is highlighted, no Ctrl+C needed). "clipboard" = the normal clipboard.
+grab = "primary"
+# Commands used to grab and paste. First one that exists in PATH wins.
+grab_cmds = [
+  ["wl-paste", "--primary", "--no-newline"],
+  ["xclip", "-o", "-selection", "primary"],
+]
+# When nothing is selected, use the clipboard instead (off: nothing happens).
+grab_fallback_clipboard = false
+# "clipboard": put the result on the clipboard and press Ctrl+V with one of
+# paste_key_cmds (the clipboard is restored afterwards). "type": type it in
+# with paste_cmds (text on stdin). Each list is tried in order until one works;
+# "clipboard" falls back to "type". GNOME Wayland needs ydotool (wtype does not
+# work on GNOME).
+paste = "clipboard"
+paste_key_cmds = [
+  ["wtype", "-M", "ctrl", "v", "-m", "ctrl"],
+  ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"],
+  ["xdotool", "key", "--clearmodifiers", "ctrl+v"],
+]
+paste_cmds = [
+  ["wtype", "-"],
+  ["ydotool", "type", "--file", "/dev/stdin"],
+  ["xdotool", "type", "--clearmodifiers", "--file", "-"],
+]
+# If no paste command is available, copy the result to the clipboard instead.
+fallback_to_clipboard = true
+# Ask your login shell for API keys and PATH when this process cannot see them
+# (apps started by the desktop often miss what ~/.bashrc or ~/.zshrc export).
+login_shell_env = true
+
+[translate]
+# Replaces {target} in prompts (the Translate action). The popup's T key cycles
+# through `targets` and saves the choice here; the CLI takes --target.
+target = "en"
+targets = ["en", "de", "fa"]
+
+# Actions appear in the popup in this order; `key` is the single-key shortcut.
+# {text} in a prompt is replaced by the selection (wrapped in <text> tags);
+# without {text} the selection goes after the prompt. Optional per action:
+# backend = "claude-code" (overrides provider.use), model = "sonnet", and
+# output = "replace" (default: paste over the selection), "clipboard" (copy it)
+# or "show" (only show it; the CLI prints it).
+# {explain_in} becomes general.explain_in. Your [[actions]] replace this whole
+# list (the popup's star button adds one; it copies this list first); ids and
+# keys must be unique. Keys are case-insensitive. Reserved by the popup
+# (ignored with a warning): Enter Esc r c d p e / u t k x m n.
 
 [[actions]]
 id = "fix"
@@ -69,19 +152,76 @@ key = "3"
 prompt = "Rewrite this to be shorter and more direct without losing information.\n\n{text}"
 
 [[actions]]
+id = "translate"
+name = "Translate"
+key = "4"
+prompt = "Translate this into the language with ISO 639-1 code \"{target}\". Keep the formatting and tone. If it is already in that language, fix it instead.\n\n{text}"
+
+[[actions]]
+id = "summarise"
+name = "Summarise"
+key = "5"
+output = "show"
+prompt = "Summarise this in a few sentences, in the same language.\n\n{text}"
+
+[[actions]]
+id = "explain"
+name = "Explain"
+key = "6"
+output = "show"
+prompt = "Explain this in plain words: what it says, any jargon or references, and its tone. Keep it short. Answer in {explain_in}.\n\n{text}"
+
+[[actions]]
+id = "key_points"
+name = "Key points"
+key = "7"
+output = "show"
+prompt = "Extract the key points as a short Markdown bullet list, same language, no preamble.\n\n{text}"
+
+[[actions]]
+id = "table"
+name = "Make table"
+key = "8"
+output = "show"
+prompt = "Turn this into a Markdown table. Infer sensible column headers from the content; one row per item; no text outside the table.\n\n{text}"
+
+# Modifiers: toggles in the popup (one row under the actions). The suffixes of
+# the ones switched on are added to the next run's prompt, then they switch off.
+# Keys must not clash with action keys (a built-in modifier whose key one of
+# your actions uses loses its key). Your [[modifiers]] replace this list.
+
+[[modifiers]]
+id = "shorter"
+name = "Shorter"
+key = "-"
+suffix = "Make it shorter."
+
+[[modifiers]]
+id = "longer"
+name = "Longer"
+key = "+"
+suffix = "Make it a bit longer and more detailed."
+
+[[modifiers]]
+id = "warmer"
+name = "Warmer"
+key = "w"
+suffix = "Make the tone warmer and friendlier."
+
+[[modifiers]]
 id = "formal"
 name = "Formal"
-key = "4"
-prompt = "Rewrite this in a polite, professional tone.\n\n{text}"
+key = "f"
+suffix = "Make the tone more formal and professional."
 
-[[actions]]
-id = "casual"
-name = "Casual"
-key = "5"
-prompt = "Rewrite this in a relaxed, friendly tone.\n\n{text}"
+[[modifiers]]
+id = "british"
+name = "British"
+key = "b"
+suffix = "Use British English spelling and vocabulary."
 
-[[actions]]
-id = "translate"
-name = "To English"
-key = "6"
-prompt = "Translate this to natural English. If it is already English, fix it instead.\n\n{text}"
+[[modifiers]]
+id = "american"
+name = "American"
+key = "a"
+suffix = "Use American English spelling and vocabulary."

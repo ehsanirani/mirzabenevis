@@ -7,31 +7,58 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main class="popup" id="popup">
+  <main class="popup">
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="title" data-tauri-drag-region>mirzabenevis</span>
+      <span id="modeTag" data-tauri-drag-region></span>
+      <span class="grip" data-tauri-drag-region></span>
+      <span class="title fa" lang="fa" dir="rtl" data-tauri-drag-region>میرزا بنویس</span>
+      <button id="closeBtn" type="button" title="Close (Esc)" aria-label="Close">×</button>
+    </header>
+    <section class="pane original">
+      <div class="label">Original <span><kbd>E</kbd> edit</span></div>
+      <textarea id="original" rows="2" spellcheck="false" aria-label="Original text"
+        placeholder="Nothing selected. Press E, then paste or type text here."></textarea>
+    </section>
+
     <header class="bar" data-tauri-drag-region>
       <nav class="actions" id="actions" aria-label="Actions"></nav>
-      <span class="model" id="model" title="Change in config.toml"></span>
+      <form id="promptForm">
+        <input id="prompt" type="text" list="recents" spellcheck="false" aria-label="Custom instruction" />
+        <datalist id="recents"></datalist>
+        <button id="star" type="button" title="Save this instruction as a button"
+          aria-label="Save this instruction as a button">★</button>
+      </form>
+      <nav class="actions modifiers" id="modifiers" aria-label="Modifiers for the next run"></nav>
+      <input id="context" type="text" spellcheck="false" hidden aria-label="Context for every run today"
+        placeholder="Context for every run today, e.g. reply to my PI, keep it short (Esc back)" />
     </header>
 
-    <section class="pane original">
-      <textarea id="original" rows="3" spellcheck="false"
-        placeholder="Nothing selected. Paste or type text here."></textarea>
+    <section class="pane result">
+      <div class="label"><span id="resultTitle">Result</span> <span id="resultName"></span> <span><kbd>X</kbd> changes <kbd>D</kbd> diff</span></div>
+      <div class="result-text" id="result" tabindex="0" role="region" aria-label="Result" aria-live="polite"></div>
     </section>
 
-    <section class="pane result" id="resultPane" hidden>
-      <div class="result-text" id="result" tabindex="0" aria-live="polite"></div>
-    </section>
+      <div id="chipMenu" class="menu" role="menu" hidden></div>
 
-    <footer class="hint">
-      <span id="status"></span>
+  <footer class="hint">
+      <button class="backend" id="backend" type="button" aria-haspopup="dialog" aria-keyshortcuts="m">…</button>
+      <span id="status" role="status"></span>
       <span class="keys">
-        <kbd>Enter</kbd> paste
-        <kbd>Ctrl</kbd><kbd>C</kbd> copy
-        <kbd>R</kbd> redo
-        <kbd>Esc</kbd> close
+        <span id="enterKey"><kbd>Enter</kbd> <span id="enterHint">Run</span></span>
+        <kbd>C</kbd> Copy
+        <kbd>R</kbd> Redo
+        <kbd>P</kbd> <span id="pin">pinned</span>
+        <kbd>Esc</kbd> <span id="escHint">Close</span>
       </span>
     </footer>
   </main>
+  <dialog id="picker" aria-label="AI backend">
+    <div id="pickerList"></div>
+    <p class="picker-hint">↑↓ Enter choose · type a model, Enter saves · Esc close</p>
+  </dialog>
+  <script src="diff.js"></script>
+  <script src="md.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

@@ -1,91 +1,79 @@
 # mirzabenevis
 
 Select text in any app, press a key, get it fixed, rewritten or translated, pasted back in place.
-Linux first, NixOS friendly, local-model friendly. One config file controls everything.
+Linux first, NixOS friendly, local-model friendly. Finds the AI you already have
+(API keys, Claude Code, Ollama, ...) without configuration.
 
-```
-crates/core/   config, providers (OpenAI-compatible + Anthropic), grab/paste
-crates/cli/    mirzabenevis-cli  — headless; bind it to a key, or pipe text through it
-src-tauri/     mirzabenevis      — tray app + popup window
-ui/            the popup (plain HTML/CSS/JS, no bundler)
-```
+## Features
+
+- Select text anywhere → press a hotkey → it is fixed, rewritten or translated and pasted back over the selection
+- Auto-detects your AI: API keys (Anthropic, DeepSeek, OpenAI, Gemini, OpenRouter, ...), Claude Code, Codex, `llm`, Ollama, LM Studio, llama.cpp, vLLM, or any custom endpoint
+- Inline word diff of what changed
+- Type your own instruction, refine the result, and save it as a new chip with ★
+- Modifiers: shorter, longer, warmer, formal, British, American
+- Chat mode when nothing is selected; summaries and explanations rendered as Markdown
+- History of runs with undo (paste the original back)
+- A headless CLI to bind to a key or pipe text through
+- Linux/NixOS first (Wayland and X11)
 
 ## Quick start (NixOS)
 
 ```sh
-cd ~/projects/mirzabenevis
+git clone https://github.com/ehsanirani/mirzabenevis && cd mirzabenevis
 direnv allow            # or: nix develop
-cargo run -p mirzabenevis-cli -- config init
-$EDITOR ~/.config/mirzabenevis/config.toml   # set provider/model
-```
-
-The default config points at Ollama (`http://localhost:11434/v1`, model `qwen2.5:7b`).
-For any hosted provider change `[provider]`, and put the key in the env var named by
-`api_key_env` (default `MIRZABENEVIS_API_KEY`).
-
-Try it:
-
-```sh
+cargo run -p mirzabenevis-cli -- providers          # what AI backends were found
+cargo run -p mirzabenevis-cli -- providers --check  # ...and does each one answer
 echo "this are a test" | cargo run -p mirzabenevis-cli -- run fix --print
+cargo tauri dev                                     # the tray app + popup
 ```
 
-## CLI
+No config file is needed. `config init` writes a commented one to edit.
 
-```
-mirzabenevis-cli run [ACTION] [--print] [--copy] [--stdin] [--prompt "…"]
-mirzabenevis-cli actions
-mirzabenevis-cli grab
-mirzabenevis-cli config path|init|show|model <name>|provider <openai|anthropic> [url]
-```
+## GNOME Wayland setup
 
-`run` reads the primary selection (what you highlighted), sends it through the action,
-and types the result back. With `--print` it writes to stdout; with piped input it reads stdin.
+Grabbing the selection needs `wl-clipboard`; pasting back needs `ydotool` (`wtype` does not
+work on GNOME). On NixOS:
 
-Bind it in your compositor, e.g. Hyprland:
-
-```
-bind = SUPER, G, exec, mirzabenevis-cli run fix
-bind = SUPER SHIFT, G, exec, mirzabenevis --popup
+```nix
+programs.ydotool.enable = true;             # runs ydotoold
+users.users.<you>.extraGroups = [ "ydotool" ];
+environment.systemPackages = with pkgs; [ wl-clipboard ];
 ```
 
-Sway: `bindsym $mod+g exec mirzabenevis-cli run fix`.
-GNOME/KDE: add a custom shortcut in keyboard settings with the same command.
+Log out and in after adding the group. Then add a custom shortcut in GNOME keyboard settings
+that runs `mirzabenevis --popup` (or `mirzabenevis-cli run fix` for a one-key fix). The tray
+icon needs the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/)
+extension. Other compositors and X11: see [Grab and paste on Linux](docs/cli.md#grab-and-paste-on-linux).
 
-## Popup app
+## Popup keys
 
-```sh
-cargo tauri dev        # inside the dev shell
-```
+| Key | Does |
+| --- | --- |
+| `1`–`9` | Run that action (Fix grammar, Improve, Make concise, Translate, Summarise, ...) |
+| `Enter` | Run the active action; with a result, Replace the selection |
+| `/` | Type an instruction (refines the result; continues as a chat after a summary) |
+| `D` / `X` | Toggle the word diff / explain what changed |
+| `-` `+` `W` `F` `B` `A` | Toggle a modifier for the next run |
+| `T` / `M` | Next translation language / backend picker |
+| `U` | Undo the last replace |
+| `C` / `R` / `E` | Copy / redo / edit the original |
+| `Esc` | Cancel, or close |
 
-It sits in the tray. Open the popup with the hotkey in `general.hotkey` (X11 only) or by
-running `mirzabenevis --popup` (works everywhere, including Wayland, thanks to the
-single-instance plugin). The popup grabs the selection, number keys run actions, Enter pastes,
-Ctrl+C copies, Esc closes.
+All keys, chat mode and the ★ chips: [docs/popup.md](docs/popup.md).
 
-## Grab and paste on Linux
+## Documentation
 
-Reading the selection and typing text back is done by small external tools, listed in
-`[linux]` in the config. The first one found in `PATH` wins:
+- [Configuration](docs/configuration.md): backends, fallback, actions, modifiers, every setting
+- [CLI and grab/paste](docs/cli.md): `mirzabenevis-cli`, history/undo, keybinds, paste internals
+- [Popup](docs/popup.md): full key reference, chat, troubleshooting
+- [Security and privacy](docs/security.md): agent-CLI sandboxing, history, clipboard
+- [Development](docs/development.md): layout, tests, roadmap
 
-| compositor | grab | paste |
-|---|---|---|
-| wlroots (Hyprland, Sway, river) | `wl-paste --primary` | `wtype` |
-| KDE / GNOME Wayland | `wl-paste --primary` | `ydotool` (needs `ydotoold`; add `["ydotool","type","--file","-"]`) |
-| X11 | `xclip -o -selection primary` | `xdotool type --file -` |
+## Status
 
-If no paste tool is available the result lands on the clipboard instead.
+Works on Linux (Wayland and X11). Windows and macOS are not supported yet: the core is
+OS-agnostic, but grabbing the selection and pasting back are Linux-only.
 
-## Config
+## License
 
-See `config.example.toml`. Add actions as `[[actions]]` tables; `{text}` in the prompt is
-replaced by the selection. Reload from the tray menu after editing.
-
-## Status / roadmap
-
-- [x] CLI with streaming, primary-selection grab, type-back
-- [x] Tauri tray + popup, single-instance `--popup` trigger
-- [ ] Diff view in the popup
-- [ ] Settings window (today: edit the TOML, "Reload config" in the tray)
-- [ ] History of recent rewrites
-- [ ] macOS / Windows grab & paste backends (core is already OS-agnostic)
-- [ ] Nix package + NixOS module
+MIT, see [LICENSE](LICENSE).
