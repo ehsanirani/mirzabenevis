@@ -70,6 +70,16 @@ html, body {
 .titlebar .title { color: var(--ink); }
 .titlebar .fa { font: 600 13px/1 "Vazirmatn", "Noto Naskh Arabic", "Noto Sans Arabic", var(--font); letter-spacing: 0; margin-right: 4px; }
 .titlebar .grip { flex: 1; height: 100%; }
+.linkish {
+  margin: 0 12px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .lbtn {
   padding: 0 6px;
   border: 1px solid var(--line);

@@ -578,15 +578,39 @@ async fn read_clipboard() -> Result<String, String> {
 /// Create the config file if needed and open it in the desktop's editor.
 #[tauri::command]
 fn open_config() -> Result<String, String> {
-    let p = Config::init().map_err(|e| e.to_string())?;
-    std::process::Command::new("xdg-open")
-        .arg(&p)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("xdg-open: {e}"))?;
+    let p = Config::path().map_err(|e| e.to_string())?;
+    if !p.exists() {
+        Config::init().map_err(|e| e.to_string())?;
+    }
+    xdg_open(p.to_str().unwrap_or_default())?;
     Ok(p.display().to_string())
+}
+
+/// Open a file or URL with the desktop's default handler (xdg-open, then gio).
+fn xdg_open(target: &str) -> Result<(), String> {
+    let null = std::process::Stdio::null;
+    for cmd in [vec!["xdg-open", target], vec!["gio", "open", target]] {
+        if std::process::Command::new(cmd[0])
+            .args(&cmd[1..])
+            .stdin(null())
+            .stdout(null())
+            .stderr(null())
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+    Err("neither xdg-open nor gio is available".into())
+}
+
+/// Open an https:// link (About page) in the browser.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("only https links".into());
+    }
+    xdg_open(&url)
 }
 
 #[tauri::command]
@@ -661,6 +685,7 @@ pub fn run() {
             app_info,
             read_clipboard,
             open_config,
+            open_url,
             quit
         ])
         .setup(move |app| {

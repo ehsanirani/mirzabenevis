@@ -408,12 +408,21 @@ async function showAbout() {
     "Select text anywhere, press a key, get it fixed, rewritten or translated.",
     "",
     `- Config: \`${i.config_path}\``,
-    "- Source: https://github.com/ehsanirani/mirzabenevis (MIT)",
     "- Help: `mirzabenevis-cli doctor` checks your desktop setup",
     "",
     "Keys: numbers run actions · / instruction · D diff · X what changed · U undo · M backend · P pin · Esc close",
   ].join("\n");
   renderResult();
+  // Clickable links (the Markdown renderer deliberately has none).
+  const links = el("p", "links");
+  for (const [label, url] of [["GitHub: ehsanirani/mirzabenevis", "https://github.com/ehsanirani/mirzabenevis"], ["Report a problem", "https://github.com/ehsanirani/mirzabenevis/issues"]]) {
+    const b = el("button", "linkish", label);
+    b.type = "button";
+    b.title = url;
+    b.addEventListener("click", () => invoke("open_url", { url }).catch((e) => setStatus(String(e), true)));
+    links.append(b);
+  }
+  resultEl.append(links);
 }
 function openAppMenu(x, y) {
   openMenu([
