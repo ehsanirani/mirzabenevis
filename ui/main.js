@@ -366,15 +366,20 @@ const NEW_PROMPT = "Rewrite this text so that …";
 let sv = null; // the last get_settings answer
 let setTab = "General";
 let settingsOpener = null;
+let failed = {}; // data-f → { value, error } of fields refused since the page opened
 
 function setMsg(msg, isError = false) {
   const s = $("setStatus");
   s.textContent = msg;
   s.style.color = isError ? "var(--error)" : "";
 }
-function bad(input, msg) {
+function markBad(input, msg) {
   input.classList.add("bad");
   input.closest(".field").querySelector(".err").textContent = msg;
+}
+function bad(input, msg) {
+  markBad(input, msg);
+  failed[input.dataset.f] = { value: input.value, error: msg };
   setMsg(`Not saved: ${msg}`, true);
 }
 
@@ -392,6 +397,7 @@ async function settingsCall(cmd, args, input, rerender = false) {
   if (input) {
     input.classList.remove("bad");
     input.closest(".field").querySelector(".err").textContent = "";
+    delete failed[input.dataset.f];
   }
   setMsg("Saved");
   await refreshPopup().catch(() => {});
@@ -431,9 +437,23 @@ function field(label, input, save, note) {
   }
   return w;
 }
-const setting = (path) => (value, input) => (typeof value === "number" && !Number.isFinite(value)
-  ? bad(input, "Enter a number")
-  : settingsCall("set_setting", { path: path.split("."), value }, input));
+// The saved value of a setting, as get_settings reports it.
+function svValue(path) {
+  const [table, key] = path.split(".");
+  return table === "linux" ? sv.paste : table === "provider" ? sv[key] : sv[table][key];
+}
+// Save a setting; the field then shows the value as saved (trimmed, normalised).
+const setting = (path) => async (value, input) => {
+  const v = input.validity;
+  if (v.badInput || v.rangeUnderflow || v.rangeOverflow || (typeof value === "number" && !Number.isFinite(value))) {
+    return bad(input, input.min && input.max ? `Enter a number from ${input.min} to ${input.max}`
+      : input.min ? `Enter a number of at least ${input.min}` : "Enter a number");
+  }
+  if (!(await settingsCall("set_setting", { path: path.split("."), value }, input))) return;
+  const saved = svValue(path);
+  if (input.type === "checkbox") input.checked = saved;
+  else input.value = Array.isArray(saved) ? saved.join(", ") : saved;
+};
 
 // Client-side check of a key; Rust checks again (reserved and duplicate keys).
 function keyProblem(key, kind, id) {
@@ -458,16 +478,21 @@ function backendOptions(current) {
 function entryCard(kind, e, i, list) {
   const isAction = kind === "action";
   const card = el("fieldset", "entry");
-  card.append(el("legend", "", e.builtin ? `${e.id} · built in` : e.id));
+  const heading = (x) => `${x.name}${x.key ? ` (${x.key.toUpperCase()})` : ""} · ${x.id}${x.builtin ? " · built in" : ""}`;
+  const legend = card.appendChild(el("legend", "", heading(e)));
   const input = (control, k, label) => {
     control.dataset.f = `${kind}:${e.id}:${k}`;
     control.setAttribute("aria-label", `${label} of ${kind} ${e.id}`);
     return control;
   };
-  const patch = (k) => (v, control) => {
+  const patch = (k) => async (v, control) => {
     const problem = k === "key" && keyProblem(v, kind, e.id);
     if (problem) return bad(control, problem);
-    settingsCall(isAction ? "set_action" : "set_modifier", { id: e.id, patch: { [k]: v } }, control);
+    const ok = await settingsCall(isAction ? "set_action" : "set_modifier", { id: e.id, patch: { [k]: v } }, control);
+    const now = ok && sv[`${kind}s`].find((x) => x.id === e.id);
+    if (!now) return;
+    control.value = now[k] ?? ""; // as saved: trimmed, lowercase key
+    legend.textContent = heading(now);
   };
   const grid = el("div", "entry-grid");
   grid.append(
@@ -492,7 +517,12 @@ function entryCard(kind, e, i, list) {
   }
   btns.append(e.builtin
     ? smallBtn("Reset to default", `Reset ${e.name} to its default name, key, ${isAction ? "prompt and output" : "and instruction"}`, () => settingsCall(cmd("reset"), { id: e.id }, null, true))
-    : smallBtn("Remove", `Remove ${e.name}`, () => settingsCall(cmd("remove"), { id: e.id }, null, true)));
+    : smallBtn("Remove", `Remove ${e.name}`, async () => {
+      if (!(await settingsCall(cmd("remove"), { id: e.id }, null, true))) return;
+      // Focus goes on to the next card, or to "+ Add" when this was the last one.
+      const next = setPane.querySelectorAll(".entry")[i];
+      (next?.querySelector(".entry-btns button:not(:disabled)") || setPane.querySelector(":scope > .lbtn"))?.focus();
+    }));
   btns.querySelectorAll("button").forEach((b, n) => (b.dataset.f = `${kind}:${e.id}:btn${n}`));
   card.append(grid, field(isAction ? "Prompt ({text} = the selection)" : "Instruction added to the run",
     input(long, isAction ? "prompt" : "suffix", isAction ? "Prompt" : "Instruction"), patch(isAction ? "prompt" : "suffix")), btns);
@@ -517,6 +547,7 @@ const TABS = {
       field("Keep a history (undo, recent instructions)", checkIn(g.history), setting("general.history")),
       field("Desktop notifications (CLI)", checkIn(g.notify), setting("general.notify")),
       field("Explanations in", textIn(g.explain_in, { placeholder: "the language of the text" }), setting("general.explain_in"), "Language of Explain and X, e.g. fa or German"),
+      el("p", "note", "Zoom: Ctrl+= / Ctrl+- / Ctrl+0 in the popup (remembered, not in config.toml)"),
     ];
   },
   Actions: () => [
@@ -535,7 +566,7 @@ const TABS = {
     return [
       field("Translate into", selectIn(t.target, targets.map((x) => [x, x])), setting("translate.target"), "T in the popup switches to the next one"),
       field("Languages", textIn(t.targets.join(", ")), (v, input) => {
-        const list = v.split(",").map((x) => x.trim()).filter(Boolean);
+        const list = [...new Set(v.toLowerCase().split(/[\s,]+/).filter(Boolean))];
         if (!list.length) return bad(input, "List at least one language");
         settingsCall("set_setting", { path: ["translate", "targets"], value: list }, input, true);
       }, "ISO 639-1 codes, comma-separated, e.g. en, de, fa"),
@@ -549,7 +580,7 @@ const TABS = {
         catch (e) { setMsg(String(e), true); }
       }),
       smallBtn("Reload", "Read config.toml again", async () => {
-        try { await reloadConfig(); sv = await invoke("get_settings"); renderSettings(); setMsg("Reloaded"); }
+        try { await reloadConfig(); sv = await invoke("get_settings"); failed = {}; renderSettings(); setMsg("Reloaded"); }
         catch (e) { setMsg(String(e), true); }
       }),
     );
@@ -583,6 +614,13 @@ function renderSettings() {
   }));
   setPane.setAttribute("aria-label", setTab);
   setPane.replaceChildren(...TABS[setTab]());
+  // A refused value stays visible, red, until it is fixed.
+  for (const [f, { value, error }] of Object.entries(failed)) {
+    const input = setPane.querySelector(`[data-f="${CSS.escape(f)}"]`);
+    if (!input) continue;
+    if (input.type !== "checkbox") input.value = value;
+    markBad(input, error);
+  }
   setPane.scrollTop = f?.startsWith("tab:") ? 0 : setPane.scrollTop;
   // A button that became disabled (↑ at the top) hands focus to its neighbour.
   const back = f && settings.querySelector(`[data-f="${CSS.escape(f)}"]`);
@@ -605,6 +643,7 @@ async function openSettings() {
     return setStatus(String(e), true);
   }
   settingsOpener = document.activeElement;
+  failed = {};
   setMsg("");
   renderSettings();
   settings.showModal();
@@ -838,7 +877,10 @@ async function reloadConfig() {
 
 async function onShown() {
   if (picker.open) picker.close();
-  if (settings.open) settings.close();
+  if (settings.open) {
+    document.activeElement?.blur(); // a half-typed value is saved (change fires on blur)
+    settings.close();
+  }
   const shown = ++runId; // forget whatever was running when the popup was last open
   running = false;
   about = "";
