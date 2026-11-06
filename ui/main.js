@@ -26,38 +26,67 @@ const EXPLAIN = "The text holds an original and a rewritten version of it. List 
 const store = (k, v) => (v === undefined ? JSON.parse(localStorage.getItem(k) || "null") : localStorage.setItem(k, JSON.stringify(v)));
 const el = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text ? { textContent: text } : {});
 
-// Window size (not position: Wayland does not tell apps where they are) and zoom are remembered.
-// Size in logical pixels, so it survives a change of display scale.
+// Look and size come from [appearance] in config.toml. A window resized by hand keeps
+// its size (localStorage, logical pixels so it survives a change of display scale)
+// until the configured size changes. Not the position: Wayland does not tell apps where they are.
+let look = null; // the last [appearance]
+const sizeBase = () => `${look.window_width}x${look.window_height}`;
+// Clamp to the screen: a size saved on another display must not produce a window Mutter cannot show.
+const setWinSize = (w, h) => win.setSize(new LogicalSize(Math.min(w, screen.availWidth - 40), Math.min(h, screen.availHeight - 40))).catch(() => {});
 async function restoreSize() {
   const s = store("size");
-  // Clamp to the screen: a size saved on another display (or by an older build
-  // in physical pixels) must not produce a window Mutter cannot show.
-  if (s && s.w >= 520 && s.h >= 360) {
-    const w = Math.min(s.w, screen.availWidth - 40);
-    const h = Math.min(s.h, screen.availHeight - 40);
-    await win.setSize(new LogicalSize(w, h)).catch(() => {});
-  }
+  const mine = s && (s.base ?? "720x520") === sizeBase() && s.w >= 520 && s.h >= 360;
+  await setWinSize(mine ? s.w : look.window_width, mine ? s.h : look.window_height);
   let t;
   await win.onResized(({ payload }) => {
     clearTimeout(t);
     t = setTimeout(async () => {
       const l = payload.toLogical(await win.scaleFactor());
-      store("size", { w: l.width, h: l.height });
+      store("size", { w: l.width, h: l.height, base: sizeBase() });
     }, 300);
   });
 }
+// The configured size, now (it was just changed or reset).
+function applyConfiguredSize() {
+  localStorage.removeItem("size");
+  setWinSize(look.window_width, look.window_height);
+}
 // Zoom scales vw/vh too; CSS divides those by --z so they stay window-relative.
+let zoom = 1;
 const applyZoom = () => {
   document.documentElement.style.zoom = zoom;
   document.documentElement.style.setProperty("--z", zoom);
 };
-let zoom = store("zoom") || 1;
-applyZoom();
-function setZoom(z) {
+function applyAppearance(a) {
+  look = a;
+  const r = document.documentElement;
+  r.dataset.theme = a.theme;
+  zoom = a.zoom;
+  applyZoom();
+  r.style.setProperty("--fs", `${a.font_size}px`);
+  if (a.font) r.style.setProperty("--font", `${a.font}, ui-sans-serif, system-ui, sans-serif`);
+  else r.style.removeProperty("--font");
+  if (a.accent) r.style.setProperty("--accent", a.accent);
+  else r.style.removeProperty("--accent");
+}
+// Ctrl+= / Ctrl+- / Ctrl+0, saved as appearance.zoom.
+async function setZoom(z) {
   zoom = Math.min(1.4, Math.max(0.8, Math.round(z * 10) / 10));
   applyZoom();
-  store("zoom", zoom);
-  setStatus(`Zoom ${Math.round(zoom * 100)}%`);
+  if (look) look.zoom = zoom;
+  try {
+    await invoke("set_setting", { path: ["appearance", "zoom"], value: zoom });
+    setStatus(`Zoom ${Math.round(zoom * 100)}%`);
+  } catch (e) {
+    setStatus(String(e), true);
+  }
+}
+// Older versions kept the zoom in localStorage: move it to the config once.
+function migrateZoom() {
+  const old = store("zoom");
+  if (old === null) return;
+  localStorage.removeItem("zoom");
+  if (look.zoom === 1 && old !== 1) setZoom(old);
 }
 
 // The original grows with its text up to 40% of the window (CSS max-height); the result gets the rest.
@@ -230,6 +259,8 @@ function renderResult() {
 }
 
 async function init() {
+  applyAppearance((await invoke("get_info")).appearance);
+  migrateZoom();
   restoreSize().catch(() => {}); // size is a nicety; never block the popup on it
   actions = await invoke("get_actions");
   configPath = await invoke("config_path").catch(() => "");
@@ -433,7 +464,7 @@ function field(label, input, save, note) {
   w.append(el("small", "err"));
   if (save) {
     input.addEventListener("change", () => save(input.type === "checkbox" ? input.checked
-      : input.type === "number" ? input.valueAsNumber : input.value, input));
+      : input.type === "number" || input.type === "range" ? input.valueAsNumber : input.value, input));
   }
   return w;
 }
@@ -449,11 +480,47 @@ const setting = (path) => async (value, input) => {
     return bad(input, input.min && input.max ? `Enter a number from ${input.min} to ${input.max}`
       : input.min ? `Enter a number of at least ${input.min}` : "Enter a number");
   }
-  if (!(await settingsCall("set_setting", { path: path.split("."), value }, input))) return;
+  if (!(await settingsCall("set_setting", { path: path.split("."), value }, input))) return false;
   const saved = svValue(path);
   if (input.type === "checkbox") input.checked = saved;
-  else input.value = Array.isArray(saved) ? saved.join(", ") : saved;
+  else if (input.type !== "color") input.value = Array.isArray(saved) ? saved.join(", ") : saved;
+  return true;
 };
+// Width and height also resize the window right away.
+const sizeSetting = (path) => async (value, input) => (await setting(path)(value, input)) && applyConfiguredSize();
+
+// "Reset …" buttons; `confirm`: the first click only asks (a second click within 3 s resets).
+function resetBtn(label, section, confirm = false) {
+  const b = smallBtn(label, label, async () => {
+    if (confirm && !b.dataset.armed) {
+      b.dataset.armed = "1";
+      b.textContent = "Click again to confirm";
+      setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 3000);
+      return;
+    }
+    failed = {};
+    if (!(await settingsCall("reset_section", { section }, null, true))) return;
+    if (section === "appearance" || section === "everything") applyConfiguredSize();
+    setMsg(section === "everything" ? "Everything on this page is back to the defaults" : "Back to the defaults");
+  });
+  b.classList.add("reset");
+  b.dataset.f = `reset:${section}`;
+  return b;
+}
+const resetTab = (section) => resetBtn("Reset this tab to defaults", section);
+
+// A slider showing its value; it previews live and saves when let go.
+function slider(label, key, min, max, step, show) {
+  const r = Object.assign(el("input"), { type: "range", min, max, step, value: sv.appearance[key] });
+  const out = el("output", "", show(sv.appearance[key]));
+  r.addEventListener("input", () => {
+    out.textContent = show(r.valueAsNumber);
+    applyAppearance({ ...look, [key]: r.valueAsNumber });
+  });
+  const f = field(label, r, setting(`appearance.${key}`));
+  f.querySelector(".flabel").append(" ", out);
+  return f;
+}
 
 // Client-side check of a key; Rust checks again (reserved and duplicate keys).
 function keyProblem(key, kind, id) {
@@ -506,7 +573,8 @@ function entryCard(kind, e, i, list) {
       field("Model", input(textIn(e.model, { placeholder: "default" }), "model", "Model"), patch("model")),
     );
   }
-  const long = Object.assign(el("textarea"), { value: isAction ? e.prompt : e.suffix, rows: isAction ? 3 : 1, spellcheck: false });
+  const long = Object.assign(el("textarea"), { value: isAction ? e.prompt : e.suffix, rows: isAction ? 4 : 2, spellcheck: false });
+  long.addEventListener("input", () => fit(long));
   const btns = el("div", "entry-btns");
   const cmd = (verb) => `${verb}_${kind}`;
   if (isAction) {
@@ -547,18 +615,55 @@ const TABS = {
       field("Keep a history (undo, recent instructions)", checkIn(g.history), setting("general.history")),
       field("Desktop notifications (CLI)", checkIn(g.notify), setting("general.notify")),
       field("Explanations in", textIn(g.explain_in, { placeholder: "the language of the text" }), setting("general.explain_in"), "Language of Explain and X, e.g. fa or German"),
-      el("p", "note", "Zoom: Ctrl+= / Ctrl+- / Ctrl+0 in the popup (remembered, not in config.toml)"),
+      resetTab("general"),
+    ];
+  },
+  Appearance: () => {
+    const a = sv.appearance;
+    const seg = el("div", "seg");
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Theme");
+    seg.append(...[["system", "System"], ["light", "Light"], ["dark", "Dark"]].map(([v, label]) => {
+      const b = el("button", "", label);
+      b.type = "button";
+      b.dataset.f = `theme:${v}`;
+      b.setAttribute("aria-pressed", String(a.theme === v));
+      b.addEventListener("click", () => settingsCall("set_setting", { path: ["appearance", "theme"], value: v }, null, true));
+      return b;
+    }));
+    const theme = el("div", "field");
+    theme.append(el("span", "flabel", "Theme"), seg);
+    // A colour input cannot be empty: it shows the theme's accent until one is chosen.
+    const accent = Object.assign(el("input"), { type: "color", value: a.accent || getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() });
+    accent.addEventListener("input", () => applyAppearance({ ...look, accent: accent.value }));
+    const accentField = field("Accent colour", accent, setting("appearance.accent"));
+    if (a.accent) {
+      accentField.append(smallBtn("Use the theme's colour", "Use the theme's accent colour", () => settingsCall("set_setting", { path: ["appearance", "accent"], value: "" }, null, true)));
+    }
+    return [
+      theme,
+      slider("Zoom", "zoom", 0.8, 1.4, 0.1, (z) => `${Math.round(z * 100)}%`),
+      slider("Font size", "font_size", 10, 24, 1, (px) => `${px} px`),
+      field("Font", textIn(a.font, { placeholder: "the system font" }), setting("appearance.font"), "A font family installed on this computer, e.g. Inter or Vazirmatn"),
+      accentField,
+      field("Window width", numIn(a.window_width, { min: 520, step: 1 }), sizeSetting("appearance.window_width"), "px; Ctrl+= / Ctrl+- / Ctrl+0 zoom the popup"),
+      field("Window height", numIn(a.window_height, { min: 360, step: 1 }), sizeSetting("appearance.window_height"), "px; resizing the window by hand is remembered until this changes"),
+      resetTab("appearance"),
     ];
   },
   Actions: () => [
     el("p", "note", "The order here is the order of the chips. Built-in actions can be reset, your own removed."),
     smallBtn("+ Add action", "Add an action", () => addEntry("add_action", { prompt: NEW_PROMPT }, ".entry textarea")),
     ...sv.actions.map((a, i, list) => entryCard("action", a, i, list)),
+    resetBtn("Reset all to defaults", "actions", true),
+    el("p", "note", "Puts back the built-in actions and deletes your own."),
   ],
   Modifiers: () => [
     el("p", "note", "Toggles under the chips: the instruction is added to the next run."),
     smallBtn("+ Add modifier", "Add a modifier", () => addEntry("add_modifier", {}, ".entry input[data-f$=':name']")),
     ...sv.modifiers.map((m, i, list) => entryCard("modifier", m, i, list)),
+    resetBtn("Reset all to defaults", "modifiers", true),
+    el("p", "note", "Puts back the built-in modifiers and deletes your own."),
   ],
   Translate: () => {
     const t = sv.translate;
@@ -570,6 +675,7 @@ const TABS = {
         if (!list.length) return bad(input, "List at least one language");
         settingsCall("set_setting", { path: ["translate", "targets"], value: list }, input, true);
       }, "ISO 639-1 codes, comma-separated, e.g. en, de, fa"),
+      resetTab("translate"),
     ];
   },
   Advanced: () => {
@@ -593,9 +699,20 @@ const TABS = {
         "X11 only, used after a restart. On Wayland bind mirzabenevis --popup in your desktop's keyboard settings"),
       field("Config file", textIn(sv.config_path, { readOnly: true })),
       row,
+      resetTab("advanced"),
+      resetBtn("Reset everything", "everything", true),
+      el("p", "note", "Everything on this page back to the defaults, your own actions and modifiers deleted. "
+        + "API keys, custom backends, the backend choice and the grab/paste commands stay."),
     ];
   },
 };
+
+// A textarea grows with its text (at least its rows), like the Original pane.
+function fit(ta) {
+  if (!ta.isConnected || !settings.open) return; // nothing to measure yet
+  ta.style.height = "auto";
+  ta.style.height = `${ta.scrollHeight + ta.offsetHeight - ta.clientHeight}px`;
+}
 
 function renderSettings() {
   const f = document.activeElement?.dataset?.f;
@@ -614,6 +731,7 @@ function renderSettings() {
   }));
   setPane.setAttribute("aria-label", setTab);
   setPane.replaceChildren(...TABS[setTab]());
+  setPane.querySelectorAll("textarea").forEach(fit);
   // A refused value stays visible, red, until it is fixed.
   for (const [f, { value, error }] of Object.entries(failed)) {
     const input = setPane.querySelector(`[data-f="${CSS.escape(f)}"]`);
@@ -647,6 +765,7 @@ async function openSettings() {
   setMsg("");
   renderSettings();
   settings.showModal();
+  setPane.querySelectorAll("textarea").forEach(fit);
   settings.querySelector(`[data-f="tab:${setTab}"]`).focus();
 }
 // Esc: save what is being typed (change fires on blur) before the dialog goes.
@@ -859,6 +978,7 @@ function applyInfo(info) {
   target = info.target;
   maxChars = info.max_input_chars;
   modifiers = info.modifiers;
+  applyAppearance(info.appearance);
 }
 // Chips, modifiers and the translate label follow a changed config.
 async function refreshPopup() {

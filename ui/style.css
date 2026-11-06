@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f3f5f7;
   --surface: #ffffff;
   --ink: #1e2328;
@@ -11,11 +11,27 @@
   --del: rgba(179, 38, 30, .14);
   --ins: rgba(31, 122, 109, .16);
   --radius: 10px;
+  --fs: 14px; /* appearance.font_size */
   --font: ui-sans-serif, system-ui, "Inter", "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
 }
+/* appearance.theme: "dark", or "system" when the desktop is dark. The two blocks must match. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1c2127;
+  --surface: #242a31;
+  --ink: #e8ebee;
+  --muted: #8b949e;
+  --line: #353d47;
+  --accent: #4fb3a2;
+  --accent-ink: #0f1a17;
+  --error: #f28b82;
+  --del: rgba(242, 139, 130, .18);
+  --ins: rgba(79, 179, 162, .2);
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root[data-theme="system"] {
+    color-scheme: dark;
     --bg: #1c2127;
     --surface: #242a31;
     --ink: #e8ebee;
@@ -34,7 +50,7 @@ html, body {
   margin: 0;
   height: 100%;
   background: transparent;
-  font: 14px/1.45 var(--font);
+  font: var(--fs)/1.45 var(--font);
   color: var(--ink);
 }
 
@@ -308,10 +324,10 @@ html, body {
 #picker::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .2); }
 
 /* Settings: tabs on the left, the fields of one tab on the right. */
-#settings { width: min(760px, calc(94vw / var(--z, 1))); height: calc(86vh / var(--z, 1)); max-height: none; }
+#settings { width: min(calc(96vw / var(--z, 1)), 1100px); max-width: none; height: calc(90vh / var(--z, 1)); max-height: none; }
 #settings[open] { display: flex; flex-direction: column; }
 .settings { flex: 1; min-height: 0; display: flex; gap: 8px; }
-.set-tabs { flex: none; width: 116px; display: flex; flex-direction: column; gap: 2px; padding: 2px 6px 2px 0; border-right: 1px solid var(--line); }
+.set-tabs { flex: none; width: 9em; display: flex; flex-direction: column; gap: 2px; padding: 2px 6px 2px 0; border-right: 1px solid var(--line); }
 .set-tab { padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .set-tab:hover { background: var(--bg); }
 .set-tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
@@ -340,6 +356,15 @@ html, body {
 .note { color: var(--muted); font-size: 11px; }
 .err { color: var(--error); font-size: 11px; }
 .err:empty { display: none; }
+.set-pane > .reset { display: block; margin: 16px 0 4px; }
+.seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { padding: 4px 14px; border: 0; border-right: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.field input[type="range"] { padding: 0; border: 0; background: none; accent-color: var(--accent); }
+.field input[type="color"] { width: 4em; height: 2em; padding: 2px; }
+.field > .lbtn { align-self: flex-start; margin-top: 4px; }
+.flabel output { color: var(--ink); font-weight: 400; }
 #setStatus:not(:empty)::after { content: " ·"; }
 .entry { margin: 0 0 10px; padding: 4px 10px 8px; border: 1px solid var(--line); border-radius: 8px; }
 .entry legend { padding: 0 4px; color: var(--muted); font: 11px var(--mono); }
