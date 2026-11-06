@@ -16,34 +16,25 @@ Linux first, NixOS friendly, local-model friendly. Finds the AI you already have
 - A headless CLI to bind to a key or pipe text through
 - Linux/NixOS first (Wayland and X11)
 
-## Quick start (NixOS)
+<!-- Screenshot: drop a popup screenshot at docs/img/popup.png and uncomment.
+![The popup](docs/img/popup.png)
+-->
 
-```sh
-git clone https://github.com/ehsanirani/mirzabenevis && cd mirzabenevis
-direnv allow            # or: nix develop
-cargo run -p mirzabenevis-cli -- providers          # what AI backends were found
-cargo run -p mirzabenevis-cli -- providers --check  # ...and does each one answer
-echo "this are a test" | cargo run -p mirzabenevis-cli -- run fix --print
-cargo tauri dev                                     # the tray app + popup
-```
+## Install
 
-No config file is needed. `config init` writes a commented one to edit.
-
-## GNOME Wayland setup
-
-Grabbing the selection needs `wl-clipboard`; pasting back needs `ydotool` (`wtype` does not
-work on GNOME). On NixOS:
+NixOS, with this repo as the flake input `mirzabenevis`:
 
 ```nix
-programs.ydotool.enable = true;             # runs ydotoold
+environment.systemPackages = [ inputs.mirzabenevis.packages.${pkgs.stdenv.hostPlatform.system}.default pkgs.wl-clipboard ];
+programs.ydotool.enable = true;                  # pastes back on GNOME/KDE Wayland
 users.users.<you>.extraGroups = [ "ydotool" ];
-environment.systemPackages = with pkgs; [ wl-clipboard ];
 ```
 
-Log out and in after adding the group. Then add a custom shortcut in GNOME keyboard settings
-that runs `mirzabenevis --popup` (or `mirzabenevis-cli run fix` for a one-key fix). The tray
-icon needs the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/)
-extension. Other compositors and X11: see [Grab and paste on Linux](docs/cli.md#grab-and-paste-on-linux).
+Home Manager module, `.deb` / AppImage, building from source and the GNOME tray
+extension: [docs/install.md](docs/install.md). Then run `mirzabenevis-cli doctor`: it
+checks the grab/paste tools and AI backends, and prints the exact line to bind
+`mirzabenevis --popup` to a key on your desktop. No config file is needed;
+`mirzabenevis-cli config init` writes a commented one to edit.
 
 ## Popup keys
 
@@ -63,11 +54,13 @@ All keys, chat mode and the ★ chips: [docs/popup.md](docs/popup.md).
 
 ## Documentation
 
+- [Install](docs/install.md): NixOS, Home Manager, .deb/AppImage, from source
 - [Configuration](docs/configuration.md): backends, fallback, actions, modifiers, every setting
 - [CLI and grab/paste](docs/cli.md): `mirzabenevis-cli`, history/undo, keybinds, paste internals
 - [Popup](docs/popup.md): full key reference, chat, troubleshooting
 - [Security and privacy](docs/security.md): agent-CLI sandboxing, history, clipboard
-- [Development](docs/development.md): layout, tests, roadmap
+- [Development](docs/development.md): dev shell, tests, adding a backend or action, releasing
+- [Changelog](CHANGELOG.md)
 
 ## Status
 
