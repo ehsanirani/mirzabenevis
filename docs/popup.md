@@ -39,7 +39,7 @@ the action chips, so single keys work right away:
 | `U` | Undo: paste back the original of the last result that was actually pasted over a selection (from the history; select the replaced text in your app, open the popup, press `U`) |
 | `M` | Open the backend picker (also: click the footer button): Auto, then what was found grouped as APIs / Agent CLIs / Local / Custom, each with its model in a text field. `↑`/`↓` + `Enter` chooses (saved as `provider.use`); type a model and press `Enter` in its field to save it (`provider.models.<id>`, like `config model`; empty = the default); `Esc` closes |
 | `N` | In a chat: new chat (forgets the turns so far); no effect otherwise |
-| `Ctrl+=` / `Ctrl+−` / `Ctrl+0` | Zoom in / out (80–140%) / reset; remembered, like the window size |
+| `Ctrl+=` / `Ctrl+−` / `Ctrl+0` | Zoom in / out (80–140%) / reset; saved as `appearance.zoom` |
 | `P` | Pin / unpin (pinned popups stay open when focus leaves; shown in the footer) |
 | `Esc` | Cancel the running request (from anywhere); when idle, close (from an input: back to the chips) |
 
@@ -60,6 +60,8 @@ written: the field turns red with the reason. Tabs:
 - **General**: the default action (Enter), replace automatically, paste by clipboard + Ctrl+V
   or by typing, history, desktop notifications (CLI), the language of explanations, and a
   reminder of the zoom keys.
+- **Appearance**: theme (System / Light / Dark), zoom and font size (sliders), font family,
+  accent colour and the window size; all apply at once (`[appearance]` in the config).
 - **Actions**: every action's name, key, output, backend (blank = whatever the popup uses),
   model and prompt. `↑`/`↓` reorder them (the order of the chips), *+ Add action* adds one
   and puts the cursor in its prompt, built-in actions have *Reset to default* (name, key,
@@ -70,8 +72,12 @@ written: the field turns red with the reason. Tabs:
 - **Advanced**: max tokens, temperature, timeout, longest input, the X11 hotkey (used after a
   restart), the config file's path, *Open config.toml* and *Reload*.
 
-API keys, custom backends and the grab/paste commands are not on the page: edit the file for
-those.
+Each tab ends with *Reset this tab to defaults*, which removes that tab's settings from the
+file so the defaults apply again. On Actions and Modifiers it is *Reset all to defaults*: it
+deletes your own entries too, so it asks for a second click within 3 seconds. *Reset
+everything* (Advanced, same second click) does that for every tab at once. API keys, custom
+backends, the backend choice and the grab/paste commands are not on the page and no reset
+touches them: edit the file for those.
 
 The backend picker sits in the footer (hover for the full name). Replace pastes with
 Ctrl+V when a key tool is available, else types the text; when neither exists (or

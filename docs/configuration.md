@@ -72,5 +72,11 @@ login shell for new API keys). Most of it can also be changed from the popup's
   trailing newline back.
 - **Limits**: `general.max_input_chars` (default 40000) refuses longer text before
   anything is sent; `provider.max_tokens` defaults to 16384.
+- **Appearance**: `[appearance]` holds the popup's look: `theme = "system"` (follows the
+  desktop) or `"light"` / `"dark"`, `zoom = 1.0` (0.8–1.4, also `Ctrl+=` / `Ctrl+-` /
+  `Ctrl+0` in the popup), `font_size = 14` (px), `font = ""` (a font family; empty = the
+  system font), `accent = ""` (`"#rrggbb"`; empty = the theme's), and the size the popup
+  opens at, `window_width = 720` / `window_height = 520` (at least 520 × 360; a window
+  resized by hand keeps its size until these change).
 - **Hotkey**: `general.hotkey` is empty (off) by default. It only works on X11; on Wayland
   bind `mirzabenevis --popup` in your compositor or desktop keyboard settings instead.
