@@ -298,10 +298,14 @@ fn set_setting(
     value: serde_json::Value,
 ) -> Result<SettingsView, String> {
     let path: Vec<&str> = path.iter().map(String::as_str).collect();
-    if !SETTINGS.contains(&path.join(".").as_str()) {
+    if !SETTINGS
+        .iter()
+        .any(|s| s.split('.').eq(path.iter().copied()))
+    {
         return Err(format!("`{}` cannot be set here", path.join(".")));
     }
     let value = config::toml_value(&value).map_err(|e| format!("{e:#}"))?;
+    config::check_setting(&path, &value).map_err(|e| format!("{e:#}"))?;
     saved(
         &state,
         Config::edit_file(|doc| config::set_doc_value(doc, &path, value)),

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The default config, kept in sync with the file at the repo root.
 pub const DEFAULT_CONFIG: &str = include_str!("../../../config.example.toml");
@@ -424,21 +424,7 @@ impl Config {
     /// improved defaults (actions, prompt, order) from future versions.
     /// Returns the config as now saved.
     pub fn edit_file(edit: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<()>) -> Result<Self> {
-        let file = Self::path()?;
-        let raw = if file.exists() {
-            std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?
-        } else {
-            String::new()
-        };
-        let mut doc: toml_edit::DocumentMut = raw.parse().context("config is not valid TOML")?;
-        edit(&mut doc)?;
-        let updated = doc.to_string();
-        let cfg = Self::from_user_toml(&updated).context("edited config would not load")?;
-        if let Some(dir) = file.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&file, updated)?;
-        Ok(cfg)
+        edit_path(&Self::path()?, edit)
     }
 
     /// Set one value in the config file (see [`Config::edit_file`]).
@@ -479,6 +465,89 @@ impl Config {
             lines.push(format!("Context: {context}"));
         }
         lines.join("\n")
+    }
+}
+
+/// [`Config::edit_file`] on `file`. A symlinked file is edited where it
+/// points; the new text goes to a temporary file (with the original's
+/// permissions) that then replaces it, so a crash cannot leave half a config.
+/// An edit that changes nothing writes nothing; a file saved by someone else
+/// since it was read is not overwritten.
+fn edit_path(
+    file: &Path,
+    edit: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<()>,
+) -> Result<Config> {
+    let file = if file.exists() {
+        std::fs::canonicalize(file).with_context(|| format!("resolving {}", file.display()))?
+    } else {
+        file.to_path_buf()
+    };
+    let modified = |f: &Path| -> Result<Option<std::fs::Metadata>> {
+        Ok(if f.exists() {
+            Some(std::fs::metadata(f)?)
+        } else {
+            None
+        })
+    };
+    let before = modified(&file)?;
+    let raw = match &before {
+        Some(_) => {
+            std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?
+        }
+        None => String::new(),
+    };
+    let mut doc: toml_edit::DocumentMut = raw.parse().context("config is not valid TOML")?;
+    edit(&mut doc)?;
+    let updated = doc.to_string();
+    let cfg = Config::from_user_toml(&updated).context("edited config would not load")?;
+    if updated == raw {
+        return Ok(cfg);
+    }
+    let mtime = |m: &Option<std::fs::Metadata>| m.as_ref().map(|m| m.modified().ok());
+    if mtime(&modified(&file)?) != mtime(&before) {
+        anyhow::bail!(
+            "{} was changed by another program; reload the config and try again",
+            file.display()
+        );
+    }
+    let dir = file.parent().context("the config path has no directory")?;
+    std::fs::create_dir_all(dir)?;
+    let tmp = file.with_extension("toml.tmp");
+    let write = || -> Result<()> {
+        std::fs::write(&tmp, &updated)?;
+        if let Some(m) = &before {
+            std::fs::set_permissions(&tmp, m.permissions())?;
+        }
+        std::fs::rename(&tmp, &file)?;
+        Ok(())
+    };
+    write()
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+        .with_context(|| format!("writing {}", file.display()))?;
+    Ok(cfg)
+}
+
+/// Limits the settings page keeps to (a value outside them may still load
+/// from the file, but makes little sense).
+pub fn check_setting(path: &[&str], value: &toml_edit::Value) -> Result<()> {
+    let number = value
+        .as_float()
+        .or_else(|| value.as_integer().map(|i| i as f64));
+    match path {
+        ["provider", "temperature"] if !number.is_some_and(|t| (0.0..=2.0).contains(&t)) => {
+            anyhow::bail!("the temperature is between 0 and 2")
+        }
+        ["provider", "max_tokens" | "timeout_secs"] | ["general", "max_input_chars"]
+            if number.is_some_and(|n| n < 1.0) =>
+        {
+            anyhow::bail!("`{}` must be at least 1", path.join("."))
+        }
+        ["translate", "targets"] if value.as_array().is_some_and(|a| a.is_empty()) => {
+            anyhow::bail!("list at least one language")
+        }
+        _ => Ok(()),
     }
 }
 
@@ -743,12 +812,23 @@ pub fn move_entry(
     id: &str,
     delta: isize,
 ) -> Result<()> {
-    let aot = list_of(doc, list, true)?;
-    let i = index_of(aot, list, id)?;
-    let j = i.saturating_add_signed(delta).min(aot.len() - 1);
+    // Where it is, from the file's list or else the built-in one (not copied
+    // in unless something moves).
+    let ids: Vec<String> = match doc.get(list).and_then(|i| i.as_array_of_tables()) {
+        Some(aot) => aot.iter().filter_map(id_of).map(String::from).collect(),
+        None => default_entries(list)?
+            .iter()
+            .filter_map(id_of)
+            .map(String::from)
+            .collect(),
+    };
+    let i = (ids.iter().position(|x| x == id))
+        .with_context(|| format!("no {} `{id}` in the config file", noun(list)))?;
+    let j = i.saturating_add_signed(delta).min(ids.len() - 1);
     if i == j {
         return Ok(());
     }
+    let aot = list_of(doc, list, true)?;
     let places: Vec<_> = aot
         .iter()
         .map(|t| (t.position(), t.decor().clone()))
@@ -774,11 +854,29 @@ pub fn reset_entry(doc: &mut toml_edit::DocumentMut, list: &str, id: &str) -> Re
         .into_iter()
         .find(|t| id_of(t) == Some(id))
         .with_context(|| format!("`{id}` is not a built-in {}", noun(list)))?;
+    // The default key stays off when another action or modifier has it now.
+    let c = Config::from_user_toml(&doc.to_string())?;
+    let mine = |l: &str, x: &str| l == list && x == id;
+    let taken: Vec<String> = (c.actions.iter())
+        .filter(|a| !mine("actions", &a.id))
+        .map(|a| a.key.clone())
+        .chain(
+            c.modifiers
+                .iter()
+                .filter(|m| !mine("modifiers", &m.id))
+                .map(|m| m.key.clone()),
+        )
+        .filter(|k| !k.is_empty())
+        .collect();
     let aot = list_of(doc, list, true)?;
     let i = index_of(aot, list, id)?;
     let t = aot.get_mut(i).expect("index_of found it");
     for f in fields(list) {
         if matches!(*f, "backend" | "model") {
+            continue;
+        }
+        let default_key = default.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        if *f == "key" && taken.iter().any(|k| k == default_key) {
             continue;
         }
         match default.get(f).and_then(|i| i.as_value()) {
@@ -803,7 +901,12 @@ pub fn remove_entry(doc: &mut toml_edit::DocumentMut, list: &str, id: &str) -> R
     let not_found = || format!("no {} `{id}` in the config file", noun(list));
     let aot = list_of(doc, list, false).with_context(not_found)?;
     let i = index_of(aot, list, id)?;
+    // The first entry carries the comment above the list; the next one gets it.
+    let decor = aot.get(i).map(|t| t.decor().clone());
     aot.remove(i);
+    if let (0, Some(next), Some(decor)) = (i, aot.get_mut(0), decor) {
+        *next.decor_mut() = decor;
+    }
     Ok(())
 }
 
@@ -958,6 +1061,19 @@ mod tests {
         assert_eq!(c.translate.targets, ["en", "fr"]);
         assert!(toml_value(&serde_json::json!({"a": 1})).is_err());
         assert!(toml_value(&serde_json::json!([1])).is_err());
+        // Out of range for the settings page.
+        for (path, v, ok) in [
+            (&["provider", "temperature"][..], "2", true),
+            (&["provider", "temperature"], "2.5", false),
+            (&["provider", "temperature"], "-0.1", false),
+            (&["provider", "timeout_secs"], "0", false),
+            (&["provider", "max_tokens"], "1", true),
+            (&["general", "max_input_chars"], "0", false),
+            (&["translate", "targets"], "[]", false),
+            (&["general", "explain_in"], "\"\"", true),
+        ] {
+            assert_eq!(check_setting(path, &json(v)).is_ok(), ok, "{path:?} {v}");
+        }
         // A string where a number belongs does not load.
         let bad = set_toml_value(&out, &["provider", "max_tokens"], "many").unwrap();
         assert!(Config::from_user_toml(&bad).is_err());
@@ -1019,6 +1135,17 @@ mod tests {
         assert_eq!(c.action("improve").unwrap().name, "Improve");
         let id = add_action_to(&mut doc, "Be nice").unwrap();
         assert!(reset_entry(&mut doc, "actions", &id).is_err());
+        // ...except a default key someone else has taken meanwhile.
+        patch_entry(&mut doc, "actions", "concise", &patch(&[("key", "")])).unwrap();
+        patch_entry(&mut doc, "actions", &id, &patch(&[("key", "3")])).unwrap();
+        patch_entry(&mut doc, "actions", "concise", &patch(&[("name", "C")])).unwrap();
+        reset_entry(&mut doc, "actions", "concise").unwrap();
+        let c = Config::from_user_toml(&doc.to_string()).unwrap();
+        let concise = c.action("concise").unwrap();
+        assert_eq!(
+            (concise.name.as_str(), concise.key.as_str()),
+            ("Make concise", "")
+        );
 
         // A built-in modifier copied into the file loses a key your action uses.
         let mut doc: toml_edit::DocumentMut =
@@ -1045,6 +1172,18 @@ mod tests {
         assert_eq!(c.modifiers.len(), default_modifiers().len() + 2);
         remove_entry(&mut doc, "modifiers", &id).unwrap();
         assert!(remove_entry(&mut doc, "modifiers", "warmer").is_err());
+
+        // Removing the first entry keeps the comment above the list.
+        let mut doc: toml_edit::DocumentMut =
+            "x = 1\n\n# my list\n[[actions]]\nid = \"a\"\nname = \"A\"\nprompt = \"p\"\n\n\
+             [[actions]]\nid = \"b\"\nname = \"B\"\nprompt = \"p\"\n"
+                .parse()
+                .unwrap();
+        remove_entry(&mut doc, "actions", "a").unwrap();
+        assert_eq!(
+            doc.to_string(),
+            "x = 1\n\n# my list\n[[actions]]\nid = \"b\"\nname = \"B\"\nprompt = \"p\"\n"
+        );
     }
 
     #[test]
@@ -1066,6 +1205,58 @@ mod tests {
         assert_eq!(ids(&doc)[0], "improve");
         move_entry(&mut doc, "actions", "fix", -99).unwrap();
         assert_eq!(doc.to_string(), DEFAULT_CONFIG);
+        // Nothing moves: the built-in list is not copied in.
+        let mut empty = toml_edit::DocumentMut::new();
+        move_entry(&mut empty, "actions", "fix", -1).unwrap();
+        assert_eq!(empty.to_string(), "");
+        assert!(move_entry(&mut empty, "actions", "nope", 1).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_writes_atomically_through_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("mirzabenevis-edit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (real, link) = (dir.join("real.toml"), dir.join("config.toml"));
+        std::fs::write(&real, "# mine\n[general]\nauto_paste = true\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        symlink(&real, &link).unwrap();
+
+        let set = |doc: &mut toml_edit::DocumentMut| {
+            set_doc_value(doc, &["general", "auto_paste"], false)
+        };
+        let c = edit_path(&link, set).unwrap();
+        assert!(!c.general.auto_paste);
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        let text = std::fs::read_to_string(&real).unwrap();
+        assert_eq!(text, "# mine\n[general]\nauto_paste = false\n");
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert!(!dir.join("real.toml.tmp").exists());
+
+        // Changed by someone else between reading and writing: refused, untouched.
+        let e = edit_path(&link, |doc| {
+            std::fs::File::options()
+                .write(true)
+                .open(&real)?
+                .set_modified(std::time::UNIX_EPOCH)?;
+            set_doc_value(doc, &["general", "auto_paste"], true)
+        })
+        .unwrap_err();
+        assert!(e.to_string().contains("changed by another program"), "{e}");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), text);
+
+        // Nothing to change: nothing written.
+        let mtime = || std::fs::metadata(&real).unwrap().modified().unwrap();
+        let before = mtime();
+        edit_path(&link, |doc| {
+            set_doc_value(doc, &["general", "auto_paste"], false)
+        })
+        .unwrap();
+        assert_eq!(mtime(), before);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
