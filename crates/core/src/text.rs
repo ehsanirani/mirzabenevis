@@ -100,9 +100,14 @@ pub fn paste(cfg: &Config, text: &str) -> Result<PasteResult> {
     ))
 }
 
+/// Whether `prog` is in PATH.
+pub fn on_path(prog: &str) -> bool {
+    which::which(prog).is_ok()
+}
+
 /// Whether the session is Wayland. `wl-*` tools are skipped outside it and
 /// `xdotool` inside it (it would only reach XWayland windows).
-fn wayland() -> bool {
+pub fn wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
@@ -234,7 +239,8 @@ fn hold_clipboard(text: &str) -> Result<Option<arboard::Clipboard>> {
     Ok(Some(cb))
 }
 
-fn first_available(cmds: &[Vec<String>]) -> Option<&Vec<String>> {
+/// The first command that is in PATH and fits the session (Wayland or X11).
+pub fn first_available(cmds: &[Vec<String>]) -> Option<&Vec<String>> {
     let wayland = wayland();
     cmds.iter()
         .find(|c| fits_session(c, wayland) && which::which(&c[0]).is_ok())

@@ -5,6 +5,8 @@ use mirzabenevis_core::{backends, history, provider, text, Backend, Config, Dete
 use std::io::{IsTerminal, Read, Write};
 use std::time::{Duration, Instant};
 
+mod doctor;
+
 /// mirzabenevis: select text anywhere, run an action, get the result pasted back.
 ///
 /// Bind e.g. `mirzabenevis-cli run fix` to a key in your compositor.
@@ -62,6 +64,8 @@ enum Cmd {
     Actions,
     /// Show the current selection (useful for testing grab commands)
     Grab,
+    /// Check this desktop: grab/paste tools, AI backends, and how to bind the key
+    Doctor,
     /// Manage the config file
     Config {
         #[command(subcommand)]
@@ -133,6 +137,11 @@ async fn main() -> Result<()> {
         }
         Cmd::Grab => {
             print!("{}", text::grab(&cfg)?);
+        }
+        Cmd::Doctor => {
+            if !doctor::run(&cfg).await {
+                std::process::exit(1);
+            }
         }
         Cmd::History { n } => {
             // Replacement records repeat a run; they are only there for `undo`.

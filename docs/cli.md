@@ -11,8 +11,14 @@ mirzabenevis-cli undo
 mirzabenevis-cli providers [--check] [--json]
 mirzabenevis-cli actions
 mirzabenevis-cli grab
+mirzabenevis-cli doctor
 mirzabenevis-cli config path|init|show|use <id|auto>|model <name> [--backend ID]
 ```
+
+`doctor` checks this desktop: the grab and paste tools (with the install command for your
+distro), the `ydotoold` socket, notifications and the AI backends, then prints how to bind
+`mirzabenevis --popup` to a key and the autostart entry. It changes nothing; it exits 1 when
+the selection cannot be grabbed or the result cannot be pasted.
 
 `run` reads the primary selection (what you highlighted), sends it through the action,
 and pastes the result back (see [Grab and paste on Linux](#grab-and-paste-on-linux) below). With `--print` it writes to stdout; with piped input
