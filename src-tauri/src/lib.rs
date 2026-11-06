@@ -9,9 +9,13 @@
 //! result, and pastes it back (or copies it) when you press Enter.
 
 use futures_util::future::{AbortHandle, Abortable};
-use mirzabenevis_core::config::{default_actions, Modifier, Output};
+use mirzabenevis_core::config::{
+    self, default_actions, default_modifiers, General, Modifier, Output, PasteMode, Translate,
+    RESERVED_KEYS,
+};
 use mirzabenevis_core::{backends, history, text, Action, Backend, Config, Detection, Turn};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
@@ -201,6 +205,172 @@ fn remove_action(state: State<AppState>, id: String) -> Result<Vec<ActionView>, 
     let fresh = c.remove_action(&id).map_err(|e| format!("{e:#}"))?;
     c.actions = fresh.actions;
     Ok(action_views(&c))
+}
+
+/// An action or modifier for the settings page.
+#[derive(Serialize)]
+struct Entry<T> {
+    #[serde(flatten)]
+    item: T,
+    /// One of the defaults: reset, not remove.
+    builtin: bool,
+}
+
+/// What the settings page edits. Nothing from `provider.custom`: no API keys
+/// or commands reach the page.
+#[derive(Serialize)]
+struct SettingsView {
+    general: General,
+    paste: PasteMode,
+    translate: Translate,
+    max_tokens: u32,
+    temperature: f64,
+    timeout_secs: u64,
+    actions: Vec<Entry<Action>>,
+    modifiers: Vec<Entry<Modifier>>,
+    reserved: &'static [&'static str],
+    config_path: String,
+}
+
+fn entries<T: Clone>(items: &[T], defaults: &[T], id: fn(&T) -> &str) -> Vec<Entry<T>> {
+    items
+        .iter()
+        .map(|item| Entry {
+            builtin: defaults.iter().any(|d| id(d) == id(item)),
+            item: item.clone(),
+        })
+        .collect()
+}
+
+fn settings_view(c: &Config) -> SettingsView {
+    SettingsView {
+        general: c.general.clone(),
+        paste: c.linux.paste,
+        translate: c.translate.clone(),
+        max_tokens: c.provider.max_tokens,
+        temperature: c.provider.temperature,
+        timeout_secs: c.provider.timeout_secs,
+        actions: entries(&c.actions, &default_actions(), |a| &a.id),
+        modifiers: entries(&c.modifiers, &default_modifiers(), |m| &m.id),
+        reserved: RESERVED_KEYS,
+        config_path: Config::path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+    }
+}
+
+#[tauri::command]
+fn get_settings(state: State<AppState>) -> SettingsView {
+    settings_view(&state.cfg.lock().unwrap())
+}
+
+/// Take a config just saved by `Config::edit_file` as the running one.
+fn saved(state: &AppState, fresh: anyhow::Result<Config>) -> Result<SettingsView, String> {
+    let fresh = fresh.map_err(|e| format!("{e:#}"))?;
+    let view = settings_view(&fresh);
+    *state.cfg.lock().unwrap() = fresh;
+    config_changed(state, false);
+    Ok(view)
+}
+
+/// What `set_setting` may change (never keys, URLs or commands).
+const SETTINGS: &[&str] = &[
+    "general.default_action",
+    "general.auto_paste",
+    "general.notify",
+    "general.history",
+    "general.explain_in",
+    "general.hotkey",
+    "general.max_input_chars",
+    "linux.paste",
+    "translate.target",
+    "translate.targets",
+    "provider.max_tokens",
+    "provider.temperature",
+    "provider.timeout_secs",
+];
+
+/// Save one setting (text, boolean, number or list of texts) in config.toml.
+#[tauri::command]
+fn set_setting(
+    state: State<AppState>,
+    path: Vec<String>,
+    value: serde_json::Value,
+) -> Result<SettingsView, String> {
+    let path: Vec<&str> = path.iter().map(String::as_str).collect();
+    if !SETTINGS.contains(&path.join(".").as_str()) {
+        return Err(format!("`{}` cannot be set here", path.join(".")));
+    }
+    let value = config::toml_value(&value).map_err(|e| format!("{e:#}"))?;
+    saved(
+        &state,
+        Config::edit_file(|doc| config::set_doc_value(doc, &path, value)),
+    )
+}
+
+#[tauri::command]
+fn set_action(
+    state: State<AppState>,
+    id: String,
+    patch: BTreeMap<String, String>,
+) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::patch_entry(doc, "actions", &id, &patch)),
+    )
+}
+
+/// Move an action (its chip) `delta` places.
+#[tauri::command]
+fn move_action(state: State<AppState>, id: String, delta: isize) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::move_entry(doc, "actions", &id, delta)),
+    )
+}
+
+#[tauri::command]
+fn reset_action(state: State<AppState>, id: String) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::reset_entry(doc, "actions", &id)),
+    )
+}
+
+#[tauri::command]
+fn set_modifier(
+    state: State<AppState>,
+    id: String,
+    patch: BTreeMap<String, String>,
+) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::patch_entry(doc, "modifiers", &id, &patch)),
+    )
+}
+
+#[tauri::command]
+fn add_modifier(state: State<AppState>) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::add_modifier_to(doc).map(drop)),
+    )
+}
+
+#[tauri::command]
+fn remove_modifier(state: State<AppState>, id: String) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::remove_entry(doc, "modifiers", &id)),
+    )
+}
+
+#[tauri::command]
+fn reset_modifier(state: State<AppState>, id: String) -> Result<SettingsView, String> {
+    saved(
+        &state,
+        Config::edit_file(|doc| config::reset_entry(doc, "modifiers", &id)),
+    )
 }
 
 #[tauri::command]
@@ -666,6 +836,15 @@ pub fn run() {
             add_action,
             remove_action,
             get_info,
+            get_settings,
+            set_setting,
+            set_action,
+            move_action,
+            reset_action,
+            set_modifier,
+            add_modifier,
+            remove_modifier,
+            reset_modifier,
             get_backends,
             set_backend,
             set_model,
