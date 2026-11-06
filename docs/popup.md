@@ -30,7 +30,8 @@ the action chips, so single keys work right away:
 | `/` | Type an instruction (Enter runs it on the original; with an unedited result it refines the *result* instead; after a shown answer such as a summary it continues as a **chat** about it; `Esc` back; the last 20 distinct instructions from the history are suggested). With nothing selected and an empty original, `/` is the chat box (see below) |
 | `★` / `×` | `★` beside the instruction field saves the instruction as a new chip (an `[[actions]]` entry in `config.toml`, comments kept; click-only, `output = "replace"`). Hover one of your chips and click `×` to remove it again. Built-in chips have no `×`. Hovering any chip shows its prompt. **Right-click** a chip for a menu: edit its prompt in the instruction field (tweak, Enter runs it, `★` saves a variant), copy the prompt to the clipboard, run it, or remove it (your chips only). **Middle-click** = edit the prompt in the field directly |
 | `Paste` / `Clear` | Buttons on the Original label: replace the text with the clipboard, or empty it |
-| `☰` | Title-bar menu: About, open `config.toml` in your editor, reload config, quit. Settings live in the config file; there is no separate settings window |
+| `☰` | Title-bar menu: About, Settings, open `config.toml` in your editor, reload config, quit |
+| `Ctrl+,` | Open the settings (see below) |
 | `-` `+` `W` `F` `B` `A` | Toggle a modifier (Shorter, Longer, Warmer, Formal, British, American; the row under the chips): its instruction is added to the next run, then it switches off. Clicking works too |
 | `T` | Next translation language from `translate.targets` (the chip shows it: `4 Translate → de`; saved in the config) |
 | `K` | Show the context field: a line such as "reply to my PI, keep it short" sent as `Context: …` with every run while it is set. Remembered for the rest of the day; `Esc`/`Enter` back (an empty field hides again) |
@@ -49,6 +50,27 @@ copies the last answer, nothing is replaced, `N` starts over, `Esc` cancels/clos
 the original leaves the chat. Chats are not written to the history. Shown answers (Summarise,
 Explain, Key points, Make table, `X`) and chat answers are rendered as Markdown (headings,
 lists, **bold**, `code`, code blocks, tables); Copy always copies the raw text.
+
+**Settings** (`Ctrl+,` or `☰` → Settings…) edit `config.toml` for you, comments kept. A
+change is saved as soon as you leave the field (there is no Save button) and applies right
+away; the dialog's status line says "Saved". A value the config would not accept (a key the
+popup reserves or another action or modifier uses, a word where a number belongs, ...) is not
+written: the field turns red with the reason. Tabs:
+
+- **General**: the default action (Enter), replace automatically, paste by clipboard + Ctrl+V
+  or by typing, history, desktop notifications (CLI), the language of explanations.
+- **Actions**: every action's name, key, output, backend (blank = whatever the popup uses),
+  model and prompt. `↑`/`↓` reorder them (the order of the chips), *+ Add action* adds one
+  and puts the cursor in its prompt, built-in actions have *Reset to default* (name, key,
+  prompt, output), your own have *Remove*. The first edit in a file without `[[actions]]`
+  copies the built-in list into it, as `★` does (the same goes for modifiers).
+- **Modifiers**: name, key and instruction of each; add, remove (yours) or reset (built in).
+- **Translate**: the target language and the list `T` cycles through.
+- **Advanced**: max tokens, temperature, timeout, longest input, the X11 hotkey (used after a
+  restart), the config file's path, *Open config.toml* and *Reload*.
+
+API keys, custom backends and the grab/paste commands are not on the page: edit the file for
+those.
 
 The backend picker sits in the footer (hover for the full name). Replace pastes with
 Ctrl+V when a key tool is available, else types the text; when neither exists (or

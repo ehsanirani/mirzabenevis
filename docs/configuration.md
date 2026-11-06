@@ -35,7 +35,8 @@ How agent CLIs (Claude Code, Codex, Gemini CLI) are sandboxed: see [security.md]
 ## Config
 
 See [`config.example.toml`](../config.example.toml). Reload from the tray menu after editing (this also re-reads your
-login shell for new API keys).
+login shell for new API keys). Most of it can also be changed from the popup's
+[settings](popup.md#popup-app) (`Ctrl+,`), which edit this file for you.
 
 - **Actions** are `[[actions]]` tables. The selection is sent inside `<text>…</text>` tags
   (the system prompt tells the model to treat it as data, not instructions): at `{text}`

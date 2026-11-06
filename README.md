@@ -47,6 +47,7 @@ checks the grab/paste tools and AI backends, and prints the exact line to bind
 | `-` `+` `W` `F` `B` `A` | Toggle a modifier for the next run |
 | `T` / `M` | Next translation language / backend picker |
 | `U` | Undo the last replace |
+| `Ctrl+,` / `☰` | Settings (actions, modifiers, languages, ...) / menu |
 | `C` / `R` / `E` | Copy / redo / edit the original |
 | `Esc` | Cancel, or close |
 
