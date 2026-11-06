@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+      - uses: Swatinem/rust-cache@v2
+      # trailing whitespace, yaml/toml, cargo fmt, cargo clippy (core + cli)
+      - run: pipx run prek run --all-files --show-diff-on-failure
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build -p mirzabenevis-cli && tests-e2e/run_all.sh
+      - name: Debian package
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          npx --yes @tauri-apps/cli@^2 build --bundles deb --ci
+          deb=$(echo target/release/bundle/deb/*.deb)
+          dpkg-deb -f "$deb" Depends Recommends
+          dpkg-deb -c "$deb" > files.txt
+          for f in usr/bin/mirzabenevis usr/bin/mirzabenevis-cli \
+                   usr/share/applications/mirzabenevis.desktop 128x128/apps/mirzabenevis.png; do
+            grep -q "$f\$" files.txt || { echo "missing $f"; exit 1; }
+          done
+
+  nix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix eval .#homeManagerModules.default --apply builtins.isFunction

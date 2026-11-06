@@ -191,3 +191,4 @@ expect "password clipboard not restored" "$(cat "$T/clip")" "Hello, world."
 rm -f "$G/wl-paste" "$G/wl-copy" "$G/wtype"
 
 echo; echo "passed $pass, failed $fail"
+exit $((fail > 0))
