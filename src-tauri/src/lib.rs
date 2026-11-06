@@ -550,6 +550,50 @@ fn reload_config(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct AppInfo {
+    version: &'static str,
+    config_path: String,
+}
+
+#[tauri::command]
+fn app_info() -> AppInfo {
+    AppInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        config_path: Config::path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+    }
+}
+
+/// Clipboard text for the popup's Paste button.
+#[tauri::command]
+async fn read_clipboard() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(text::clipboard_text)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Create the config file if needed and open it in the desktop's editor.
+#[tauri::command]
+fn open_config() -> Result<String, String> {
+    let p = Config::init().map_err(|e| e.to_string())?;
+    std::process::Command::new("xdg-open")
+        .arg(&p)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("xdg-open: {e}"))?;
+    Ok(p.display().to_string())
+}
+
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 fn config_path() -> Result<String, String> {
     Config::path()
@@ -613,7 +657,11 @@ pub fn run() {
             set_pinned,
             close,
             reload_config,
-            config_path
+            config_path,
+            app_info,
+            read_clipboard,
+            open_config,
+            quit
         ])
         .setup(move |app| {
             // Global hotkey: works on X11, silently unavailable on Wayland.

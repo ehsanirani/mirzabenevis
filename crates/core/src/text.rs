@@ -170,7 +170,7 @@ fn run(cmd: &[String], input: Option<&str>) -> Result<Vec<u8>> {
 }
 
 /// Current clipboard text, `""` if it is empty or holds no text.
-fn clipboard_text() -> Result<String> {
+pub fn clipboard_text() -> Result<String> {
     let wl = [vec![
         "wl-paste".into(),
         "--no-newline".into(),

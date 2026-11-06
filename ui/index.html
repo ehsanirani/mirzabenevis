@@ -13,10 +13,11 @@
       <span id="modeTag" data-tauri-drag-region></span>
       <span class="grip" data-tauri-drag-region></span>
       <span class="title fa" lang="fa" dir="rtl" data-tauri-drag-region>میرزا بنویس</span>
+      <button id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-haspopup="menu">☰</button>
       <button id="closeBtn" type="button" title="Close (Esc)" aria-label="Close">×</button>
     </header>
     <section class="pane original">
-      <div class="label">Original <span><kbd>E</kbd> edit</span></div>
+      <div class="label">Original <span><button class="lbtn" id="pasteBtn" type="button" title="Replace the text with the clipboard">Paste</button><button class="lbtn" id="clearBtn" type="button" title="Clear the text">Clear</button> <kbd>E</kbd> edit</span></div>
       <textarea id="original" rows="2" spellcheck="false" aria-label="Original text"
         placeholder="Nothing selected. Press E, then paste or type text here."></textarea>
     </section>

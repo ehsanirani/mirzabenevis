@@ -70,6 +70,20 @@ html, body {
 .titlebar .title { color: var(--ink); }
 .titlebar .fa { font: 600 13px/1 "Vazirmatn", "Noto Naskh Arabic", "Noto Sans Arabic", var(--font); letter-spacing: 0; margin-right: 4px; }
 .titlebar .grip { flex: 1; height: 100%; }
+.lbtn {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font: 11px var(--mono);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  margin-right: 4px;
+}
+.lbtn:hover { color: var(--ink); border-color: var(--accent); }
+#menuBtn,
 #closeBtn {
   border: 0;
   background: transparent;
@@ -80,7 +94,8 @@ html, body {
   border-radius: 6px;
   cursor: pointer;
 }
-#closeBtn:hover { background: var(--surface); color: var(--ink); }
+#menuBtn:hover, #closeBtn:hover { background: var(--surface); color: var(--ink); }
+#menuBtn { font-size: 13px; }
 
 .label {
   display: flex;

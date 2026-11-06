@@ -194,6 +194,12 @@ function renderResult() {
     return;
   }
   if (running) return; // streaming text is written by the chunk listener
+  if (about) {
+    resultName.textContent = "· About";
+    resultEl.classList.add("md");
+    resultEl.replaceChildren(...md(about));
+    return;
+  }
   if (showExplain) {
     resultEl.classList.add("md");
     resultEl.replaceChildren(...md(explain));
@@ -377,20 +383,70 @@ function closeChipMenu() {
   chipMenu.hidden = true;
   chipMenu.replaceChildren();
 }
+const menuItem = (label, fn, cls) => {
+  const b = el("button", cls || "", label);
+  b.type = "button";
+  b.setAttribute("role", "menuitem");
+  b.addEventListener("click", () => { closeChipMenu(); fn(); });
+  return b;
+};
 function openChipMenu(a, x, y) {
-  const item = (label, fn, cls) => {
-    const b = el("button", cls || "", label);
-    b.type = "button";
-    b.setAttribute("role", "menuitem");
-    b.addEventListener("click", () => { closeChipMenu(); fn(); });
-    return b;
-  };
   const items = [
-    item("Edit prompt in the field", () => promptToField(a)),
-    item("Copy prompt to clipboard", async () => { await invoke("copy", { result: promptOf(a.id) }); setStatus(`Copied the prompt of "${a.name}"`); }),
-    item(`Run "${a.name}"`, () => run(a.id)),
+    menuItem("Edit prompt in the field", () => promptToField(a)),
+    menuItem("Copy prompt to clipboard", async () => { await invoke("copy", { result: promptOf(a.id) }); setStatus(`Copied the prompt of "${a.name}"`); }),
+    menuItem(`Run "${a.name}"`, () => run(a.id)),
   ];
-  if (!a.builtin) items.push(el("div", "sep"), item(`Remove "${a.name}"`, () => removeAction(a), "danger"));
+  if (!a.builtin) items.push(el("div", "sep"), menuItem(`Remove "${a.name}"`, () => removeAction(a), "danger"));
+  openMenu(items, x, y);
+}
+// App menu (☰): about, config, quit. Settings = the config file; no second UI for it.
+let about = ""; // Markdown shown in the result pane until the next run / open
+async function showAbout() {
+  const i = await invoke("app_info");
+  about = [
+    `## mirzabenevis ${i.version} · میرزا بنویس`,
+    "Select text anywhere, press a key, get it fixed, rewritten or translated.",
+    "",
+    `- Config: \`${i.config_path}\``,
+    "- Source: https://github.com/ehsanirani/mirzabenevis (MIT)",
+    "- Help: `mirzabenevis-cli doctor` checks your desktop setup",
+    "",
+    "Keys: numbers run actions · / instruction · D diff · X what changed · U undo · M backend · P pin · Esc close",
+  ].join("\n");
+  renderResult();
+}
+function openAppMenu(x, y) {
+  openMenu([
+    menuItem("About", showAbout),
+    menuItem("Open config.toml", async () => {
+      try { setStatus(`Opened ${await invoke("open_config")} — Reload config after editing`); }
+      catch (e) { setStatus(String(e), true); }
+    }),
+    menuItem("Reload config", async () => {
+      try { await invoke("reload_config"); actions = await invoke("get_actions"); renderActions(); loadBackends(true); setStatus("Config reloaded"); }
+      catch (e) { setStatus(String(e), true); }
+    }),
+    el("div", "sep"),
+    menuItem("Quit mirzabenevis", () => invoke("quit"), "danger"),
+  ], x, y);
+}
+$("menuBtn").addEventListener("click", (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  openAppMenu(r.right - 200, r.bottom + 4);
+});
+// Paste / Clear for the original text.
+$("clearBtn").addEventListener("click", () => { leaveChatIfNeeded(); original.value = ""; dirty = true; grow(); original.focus(); setStatus("Cleared"); });
+$("pasteBtn").addEventListener("click", async () => {
+  try {
+    const t = await invoke("read_clipboard");
+    if (!t) return setStatus("Clipboard is empty", true);
+    leaveChatIfNeeded();
+    original.value = t; dirty = true; grow(); original.focus();
+    setStatus("Pasted from clipboard — press a number to run");
+  } catch (e) { setStatus(String(e), true); }
+});
+const leaveChatIfNeeded = () => { if (chat) leaveChat(); };
+function openMenu(items, x, y) {
   chipMenu.replaceChildren(...items);
   chipMenu.hidden = false;
   // Keep it on screen.
@@ -493,6 +549,7 @@ async function onShown() {
   if (picker.open) picker.close();
   const shown = ++runId; // forget whatever was running when the popup was last open
   running = false;
+  about = "";
   result = error = explain = "";
   showExplain = false;
   dirty = false;
@@ -540,6 +597,7 @@ async function onShown() {
 
 // Chips and R act on the original; the instruction field refines the result when there is one.
 async function run(id, refine = false) {
+  about = "";
   const input = refine ? result : original.value;
   if (!input.trim()) {
     setStatus("Nothing to work on", true);
@@ -616,6 +674,7 @@ const promptOf = (id) => (actions.find((a) => a.id === id)?.prompt || actionName
 
 // Chat: when nothing was selected, or as a follow-up to a show result (summary, explanation…).
 async function sendChat() {
+  about = "";
   const msg = promptEl.value.trim();
   if (!msg || running) return;
   if (!chat) {
