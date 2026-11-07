@@ -10,6 +10,9 @@ const actionsEl = $("actions");
 const original = $("original");
 const resultEl = $("result");
 const resultName = $("resultName");
+const explainPane = $("explainPane");
+const explainEl = $("explain");
+const popupEl = document.querySelector(".popup");
 const statusEl = $("status");
 const backendEl = $("backend");
 const picker = $("picker");
@@ -56,6 +59,7 @@ let zoom = 1;
 const applyZoom = () => {
   document.documentElement.style.zoom = zoom;
   document.documentElement.style.setProperty("--z", zoom);
+  fitExplain();
 };
 function applyAppearance(a) {
   look = a;
@@ -94,12 +98,13 @@ function migrateZoom() {
 const grow = () => {
   original.style.height = "auto";
   original.style.height = `${original.scrollHeight}px`;
+  fitExplain();
 };
 addEventListener("resize", grow); // the 40% cap moves with the window
 // Links in rendered answers open in the browser; the popup itself never navigates. A middle
 // click is an auxclick, and WebKit's link context menu could open the link in the popup.
 for (const type of ["click", "auxclick", "contextmenu"]) {
-  resultEl.addEventListener(type, (e) => {
+  for (const box of [resultEl, explainEl]) box.addEventListener(type, (e) => {
     const a = e.target.closest("a[href]");
     if (!a) return;
     e.preventDefault();
@@ -164,8 +169,8 @@ let resultOutput = "replace"; // a refine keeps the output mode of what it refin
 let grabbed = "";       // the selection in the other app: what a Replace overwrites (for undo)
 let maxChars = Infinity; // general.max_input_chars
 let resultBackend = null; // id of the backend that answered (explain-change reuses it)
-let explain = "";       // X: what changed and why; a second view, never pasted or copied
-let showExplain = false;
+let explain = "";       // X: what changed and why; shown under the result, never pasted or copied
+let showExplain = false; // its pane is open (a run while it is open is the explanation)
 let target = "";        // translate.target
 let explainIn = "";     // general.explain_in
 let defaultAction = "";
@@ -206,6 +211,7 @@ const chatting = () => !!chat || (noSelection && !original.value.trim());
 function sync() {
   const out = result && !dirty ? resultOutput : null;
   $("enterKey").hidden = out === "show" || !!chat; // show-only result: C copies, nothing replaces
+  $("resultKeys").hidden = out === "show" || chatting(); // X and D do nothing on a rendered answer
   $("enterHint").textContent = !out ? "Run" : out === "clipboard" || pasteHow === "copied" ? "Copy" : "Replace";
   $("escHint").textContent = running ? "Cancel" : "Close";
   promptEl.placeholder = chatting() ? "Message… (Enter sends, N new chat)"
@@ -220,13 +226,57 @@ const turnEl = (t) => {
   return d;
 };
 
+// The explanation's direction comes from its language, not from L: its bullets tend to start with
+// quoted words of the text, which would fool dir="auto" (a Persian list starting "goes → went").
+const RTL_LANG = /^(fa|ar|he|ur|ps|ckb|yi|sd|ug)(?![a-z])|\b(persian|farsi|dari|arabic|hebrew|urdu|pashto|yiddish|sindhi|uyghur|sorani)\b|[\u0590-\u08ff]/i;
+const scriptDir = (s) => {
+  const rtl = (s.match(/(?=\p{L})[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/gu) || []).length;
+  return rtl * 2 > (s.match(/\p{L}/gu) || []).length ? "rtl" : "ltr";
+};
+// "" = no direction of its own: each block picks (dir="auto").
+function explainDir() {
+  const lang = explainIn.trim();
+  if (lang) return RTL_LANG.test(lang) ? "rtl" : "ltr";
+  // general.explain_in empty: it is in the text's language, unless the result is in another
+  // script (a translation): then which one is unclear.
+  const d = scriptDir(lastInput);
+  return d === scriptDir(result) ? d : "";
+}
+
+// While the explanation is open the chips keep their room and the explanation gives way, down to
+// its minimum height. When even that does not fit (a short window, zoom, a big font) the chips step
+// aside (.short). Measured, and in one go, so no frame shows the overflow.
+function fitExplain() {
+  popupEl.classList.remove("short");
+  if (popupEl.classList.contains("explaining") && popupEl.scrollHeight > popupEl.clientHeight + 1) popupEl.classList.add("short");
+}
+
+function renderExplain() {
+  const on = showExplain && !!result && !chat && !about;
+  if (!on && explainPane.contains(document.activeElement)) resultEl.focus();
+  explainPane.hidden = !on;
+  popupEl.classList.toggle("explaining", on);
+  if (on) {
+    const d = explainDir();
+    if (d) explainEl.dir = d;
+    else explainEl.removeAttribute("dir");
+    explainEl.setAttribute("aria-busy", String(running));
+    explainEl.classList.toggle("streaming", running);
+    explainEl.classList.toggle("md", !running); // streamed as plain text, so lines keep their breaks
+    if (running) explainEl.textContent = explain; // the chunk listener adds the rest
+    else explainEl.replaceChildren(...md(explain));
+  }
+  fitExplain();
+}
+
 function renderResult() {
   sync();
+  renderExplain();
   $("resultTitle").textContent = chat ? "Chat" : "Result";
   $("modeTag").textContent = chat ? "· chat" : "";
-  resultName.textContent = chat ? "· N new chat" : showExplain ? "· What changed (X back)" : resultLabel;
+  resultName.textContent = chat ? "· N new chat" : resultLabel;
   resultEl.className = "result-text";
-  resultEl.setAttribute("aria-busy", String(running)); // the live region speaks once, when done
+  resultEl.setAttribute("aria-busy", String(running && !showExplain)); // the live region speaks once, when done
   // In a chat only the newest answer is live (not every turn again).
   resultEl.setAttribute("aria-live", chat ? "off" : "polite");
   if (chat) {
@@ -259,10 +309,7 @@ function renderResult() {
     resultEl.replaceChildren(...md(about));
     return;
   }
-  if (showExplain) {
-    resultEl.classList.add("md");
-    resultEl.replaceChildren(...md(explain));
-  } else if (error) {
+  if (error) {
     resultEl.classList.add("error");
     resultEl.textContent = error;
   } else if (result && resultOutput === "show") {
@@ -296,17 +343,18 @@ async function init() {
   configPath = await invoke("config_path").catch(() => "");
   await listen("chunk", (e) => {
     if (!running || e.payload.run !== runId) return;
+    const box = showExplain ? explainEl : resultEl;
     if (chat) {
       chatLive += e.payload.text;
       if (liveEl) liveEl.textContent = chatLive;
     } else if (showExplain) {
       explain += e.payload.text;
-      resultEl.textContent = explain;
+      explainEl.textContent = explain;
     } else {
       result += e.payload.text;
       resultEl.textContent = result;
     }
-    resultEl.scrollTop = resultEl.scrollHeight;
+    box.scrollTop = box.scrollHeight;
   });
 }
 
@@ -849,7 +897,7 @@ let about = ""; // Markdown shown in the result pane until the next run / open
 async function showAbout() {
   const i = await invoke("app_info");
   about = [
-    `## mirzabenevis ${i.version} · میرزا بنویس`,
+    `## mirzabenevis ${i.version} · میرزابنویس`,
     "Select text anywhere, press a key, get it fixed, rewritten or translated.",
     "",
     `- Config: \`${i.config_path}\``,
@@ -1203,11 +1251,16 @@ function leaveChat() {
   renderResult();
 }
 
-// X: ask the same backend what it changed and why; X again shows the result.
+// X: ask the same backend what it changed and why, shown in a pane under the result. X hides the
+// pane (or stops the explanation while it streams); X again shows it without asking again.
 async function explainChange() {
-  if (running || !result || chat || resultOutput === "show") return;
+  if (running && showExplain && !chat) return cancelRun();
+  if (running || !result || chat || about || resultOutput === "show") return;
   showExplain = !showExplain;
-  if (!showExplain || explain) return renderResult();
+  if (!showExplain || explain) {
+    setStatus(showExplain ? "X hides the explanation" : "X shows what changed");
+    return renderExplain();
+  }
   const input = `Original:\n${lastInput}\n\nRewritten:\n${result}`;
   if ([...input].length > maxChars) {
     showExplain = false;
@@ -1215,15 +1268,14 @@ async function explainChange() {
   }
   const myRun = ++runId;
   running = true;
-  resultEl.textContent = "";
-  renderResult();
-  resultEl.classList.add("streaming");
+  sync();
+  renderExplain();
   setStatus("Asking what changed…");
   try {
     const res = await invoke("run_action", { run: myRun, actionId: "_explain", input, prompt: EXPLAIN, backend: resultBackend });
     if (myRun !== runId) return;
     explain = res.text;
-    setStatus("X back to the result" + (explainIn ? ` · ${explainIn}` : ""));
+    setStatus("X hides the explanation" + (explainIn ? ` · ${explainIn}` : ""));
   } catch (e) {
     if (myRun !== runId) return;
     explain = "";
@@ -1232,7 +1284,9 @@ async function explainChange() {
   } finally {
     if (myRun === runId) {
       running = false;
-      renderResult();
+      sync();
+      renderExplain();
+      explainEl.scrollTop = 0; // streaming kept it at the bottom; read it from the first bullet
     }
   }
 }
@@ -1313,6 +1367,12 @@ function escape() {
 }
 $("closeBtn").addEventListener("click", () => { if (running) cancelRun(); runId++; invoke("close"); });
 
+// In the short layout the explanation took the chip bar's place: a key that needs the bar closes it.
+const makeRoom = (f) => () => {
+  if (showExplain && popupEl.classList.contains("short")) explainChange();
+  f();
+};
+
 // The one key table, used when focus is not in the textarea or the instruction field.
 const KEYS = {
   Enter: enter,
@@ -1322,10 +1382,10 @@ const KEYS = {
   d: toggleDiff,
   p: () => setPinned(!pinned),
   e: () => original.focus(),
-  "/": () => promptEl.focus(),
+  "/": makeRoom(() => promptEl.focus()),
   u: undo,
   t: cycleTarget,
-  k: openContext,
+  k: makeRoom(openContext),
   x: explainChange,
   m: openPicker,
   n: () => chatting() && newChat(),

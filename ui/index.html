@@ -12,7 +12,7 @@
       <span class="title" data-tauri-drag-region>mirzabenevis</span>
       <span id="modeTag" data-tauri-drag-region></span>
       <span class="grip" data-tauri-drag-region></span>
-      <span class="title fa" lang="fa" dir="rtl" data-tauri-drag-region>میرزا بنویس</span>
+      <span class="title fa" lang="fa" dir="rtl" data-tauri-drag-region>میرزابنویس</span>
       <button id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-haspopup="menu">☰</button>
       <button id="closeBtn" type="button" title="Close (Esc)" aria-label="Close">×</button>
     </header>
@@ -36,8 +36,13 @@
     </header>
 
     <section class="pane result">
-      <div class="label"><span id="resultTitle">Result</span> <span id="resultName"></span> <span><kbd>X</kbd> changes <kbd>D</kbd> diff</span></div>
+      <div class="label"><span id="resultTitle">Result</span> <span id="resultName"></span> <span id="resultKeys"><kbd>X</kbd> changes <kbd>D</kbd> diff</span></div>
       <div class="result-text" id="result" tabindex="0" role="region" aria-label="Result" aria-live="polite"></div>
+    </section>
+
+    <section class="pane explain" id="explainPane" hidden>
+      <div class="label"><span>What changed</span> <span><kbd>X</kbd> hide</span></div>
+      <div class="result-text md" id="explain" tabindex="0" role="region" aria-label="What changed" aria-live="polite"></div>
     </section>
 
       <div id="chipMenu" class="menu" role="menu" hidden></div>

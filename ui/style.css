@@ -236,7 +236,7 @@ html, body {
   font: inherit;
 }
 /* Once there is something to read in the result, the original keeps four lines (E expands it again). */
-.popup:has(.result-text:not(.empty)) .original textarea:not(:focus) { max-height: min(calc(5.8em + 12px), calc(40vh / var(--z, 1))); }
+.popup:has(#result:not(.empty)) .original textarea:not(:focus) { max-height: min(calc(5.8em + 12px), calc(40vh / var(--z, 1))); }
 
 .result {
   flex: 1;
@@ -255,6 +255,15 @@ html, body {
 }
 .result-text.empty { color: var(--muted); }
 .result:has(.result-text:not(.empty)) { min-height: 7em; } /* the label and three lines */
+/* X: what changed, in a pane under the result so the diff stays in view. It is as tall as its
+   text, up to 45%; the modifier row (it only affects the next run) makes room meanwhile. */
+.explain { flex: 0 1 auto; min-height: 4.5em; max-height: 45%; display: flex; flex-direction: column; border-inline-start: 3px solid var(--accent); }
+.explain[hidden], .popup.explaining .modifiers { display: none; }
+.popup.explaining .bar { flex-shrink: 0; } /* the explanation gives way first, down to its minimum */
+/* When even that does not fit, main.js sets .short: the chips step aside too (their keys still work;
+   / and K close the explanation first) and the original keeps two lines, also while edited. */
+.popup.short.explaining .bar { display: none; }
+.popup.short.explaining .pane.original #original { max-height: calc(2.9em + 12px); } /* outranks the four-line rule */
 /* Each paragraph runs in the direction of its first strong letter, so Persian lines read right to
    left. md.js marks rendered blocks dir="auto" (a list or table follows its first strong letter as a
    whole, so bullets and columns stay on one side). L sets dir on the two boxes to force one direction. */
@@ -434,6 +443,7 @@ html, body {
   cursor: pointer;
 }
 .opt .check { width: 1em; color: var(--accent); }
+.opt .name { white-space: nowrap; } /* the source gives way (ellipsis), not the name */
 .opt .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 .opt[aria-current="true"] .name { font-weight: 600; }
 .model {
