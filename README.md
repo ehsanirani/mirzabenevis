@@ -60,10 +60,10 @@ users.users.<you>.extraGroups = [ "ydotool" ];   # log out and in after this
 
 Try it without installing: `nix run github:ehsanirani/mirzabenevis -- --popup`.
 
-Other distros: `.deb` and AppImage builds will be attached to
-[GitHub Releases](https://github.com/ehsanirani/mirzabenevis/releases) from the first
-release, 0.1.0, which is not out yet. Until then, [build from source](docs/install.md#from-source). The Home Manager module, building from source and the GNOME tray
-extension are covered in [docs/install.md](docs/install.md).
+Other distros: download the `.deb` or AppImage from
+[GitHub Releases](https://github.com/ehsanirani/mirzabenevis/releases). The Home Manager
+module, building from source and the GNOME tray extension are covered in
+[docs/install.md](docs/install.md).
 
 ## Quick start
 
@@ -133,7 +133,7 @@ changed from the popup's settings window. Backends, actions, modifiers and the r
 
 ## Status
 
-Early: version 0.1.0, not released yet. It works on Linux, on Wayland and X11. Which tools
+Early: version 0.1.0. It works on Linux, on Wayland and X11. Which tools
 grab and paste on each desktop (GNOME, KDE, Hyprland, Sway, X11) is in
 [docs/cli.md](docs/cli.md#grab-and-paste-on-linux).
 
