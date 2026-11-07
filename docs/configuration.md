@@ -43,7 +43,7 @@ login shell for new API keys). Most of it can also be changed from the popup's
   in the prompt, or after the prompt when there is no `{text}`. Your `[[actions]]` replace
   the built-in list; duplicate `id`s or `key`s are an error when loading. Keys are
   case-insensitive. **Reserved** by the popup: `Enter` `Esc` `r` `c` `d` `p` `e` `/` `u` `t`
-  `k` `x` `m` `n`; an action or modifier bound to one loses its key (a warning is logged, set
+  `k` `x` `m` `n` `l`; an action or modifier bound to one loses its key (a warning is logged, set
   `MIRZABENEVIS_LOG=warn` to see it) and stays clickable.
 - **Per-action backend and model**: `backend = "claude-code"` makes that action use this
   backend whatever `provider.use`, the popup picker or `--backend` say; `model = "sonnet"`

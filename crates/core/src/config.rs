@@ -233,7 +233,7 @@ impl Action {
 
 /// Keys the popup uses itself; an action or modifier bound to one is ignored.
 pub const RESERVED_KEYS: &[&str] = &[
-    "enter", "escape", "esc", "r", "c", "d", "p", "e", "/", "u", "t", "k", "x", "m", "n",
+    "enter", "escape", "esc", "r", "c", "d", "p", "e", "/", "u", "t", "k", "x", "m", "n", "l",
 ];
 
 /// Lowercase `key`; drop it (with a warning) when the popup reserves it.

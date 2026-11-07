@@ -25,13 +25,13 @@
     <header class="bar" data-tauri-drag-region>
       <nav class="actions" id="actions" aria-label="Actions"></nav>
       <form id="promptForm">
-        <input id="prompt" type="text" list="recents" spellcheck="false" aria-label="Custom instruction" />
+        <input id="prompt" type="text" dir="auto" list="recents" spellcheck="false" aria-label="Custom instruction" />
         <datalist id="recents"></datalist>
         <button id="star" type="button" title="Save this instruction as a button"
           aria-label="Save this instruction as a button">★</button>
       </form>
       <nav class="actions modifiers" id="modifiers" aria-label="Modifiers for the next run"></nav>
-      <input id="context" type="text" spellcheck="false" hidden aria-label="Context for every run today"
+      <input id="context" type="text" dir="auto" spellcheck="false" hidden aria-label="Context for every run today"
         placeholder="Context for every run today, e.g. reply to my PI, keep it short (Esc back)" />
     </header>
 

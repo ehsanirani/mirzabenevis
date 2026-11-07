@@ -16,7 +16,8 @@ For how Replace pastes (and why it may not work in a terminal), see [Grab and pa
 It sits in the tray. Open the popup with the hotkey in `general.hotkey` (X11 only) or by
 running `mirzabenevis --popup` (works everywhere, including Wayland, thanks to the
 single-instance plugin). The popup grabs the selection into the read-mostly *Original* pane
-(it grows with the text up to 40% of the window; the result gets the rest). Focus starts on
+(it grows with the text up to 40% of the window, or four lines once there is a result, until you
+edit it with `E`; the result gets the rest). Focus starts on
 the action chips, so single keys work right away:
 
 | Key | Does |
@@ -38,6 +39,7 @@ the action chips, so single keys work right away:
 | `X` | With a rewritten result (not a shown answer such as a summary): ask the same backend what it changed and why (max 5 bullets), shown in the result pane; `X` again shows the result. The explanation is never pasted or copied: Enter/`C` still use the result |
 | `U` | Undo: paste back the original of the last result that was actually pasted over a selection (from the history; select the replaced text in your app, open the popup, press `U`) |
 | `M` | Open the backend picker (also: click the footer button): Auto, then what was found grouped as APIs / Agent CLIs / Local / Custom, each with its model in a text field. `↑`/`↓` + `Enter` chooses (saved as `provider.use`); type a model and press `Enter` in its field to save it (`provider.models.<id>`, like `config model`; empty = the default); `Esc` closes |
+| `L` | Text direction of the original and the result: auto (each paragraph follows its first letter, so Persian, Arabic and Hebrew lines read right to left), then forced right-to-left, then forced left-to-right. Only the display changes, never the text. Every popup opens in auto |
 | `N` | In a chat: new chat (forgets the turns so far); no effect otherwise |
 | `Ctrl+=` / `Ctrl+−` / `Ctrl+0` | Zoom in / out (80–140%) / reset; saved as `appearance.zoom` |
 | `P` | Pin / unpin (pinned popups stay open when focus leaves; shown in the footer) |
@@ -49,7 +51,8 @@ turns are sent along as a transcript (to the backend chosen in the picker, no fa
 copies the last answer, nothing is replaced, `N` starts over, `Esc` cancels/closes. Typing into
 the original leaves the chat. Chats are not written to the history. Shown answers (Summarise,
 Explain, Key points, Make table, `X`) and chat answers are rendered as Markdown (headings,
-lists, **bold**, `code`, code blocks, tables); Copy always copies the raw text.
+nested lists, quotes, **bold**, *italic*, `code`, code blocks, tables, https links, which open in
+your browser); Copy always copies the raw text.
 
 **Settings** (`Ctrl+,` or `☰` → Settings…) edit `config.toml` for you, comments kept. A
 change is saved as soon as you leave the field (there is no Save button) and applies right

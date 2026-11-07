@@ -89,12 +89,42 @@ function migrateZoom() {
   if (look.zoom === 1 && old !== 1) setZoom(old);
 }
 
-// The original grows with its text up to 40% of the window (CSS max-height); the result gets the rest.
+// The original grows with its text up to 40% of the window, or four lines once there is a result
+// (CSS max-height); the result gets the rest.
 const grow = () => {
   original.style.height = "auto";
   original.style.height = `${original.scrollHeight}px`;
 };
 addEventListener("resize", grow); // the 40% cap moves with the window
+// Links in rendered answers open in the browser; the popup itself never navigates. A middle
+// click is an auxclick, and WebKit's link context menu could open the link in the popup.
+for (const type of ["click", "auxclick", "contextmenu"]) {
+  resultEl.addEventListener(type, (e) => {
+    const a = e.target.closest("a[href]");
+    if (!a) return;
+    e.preventDefault();
+    if (type !== "contextmenu" && e.button < 2) invoke("open_url", { url: a.href }).catch((err) => setStatus(String(err), true));
+  });
+}
+// The chip bar is a Tauri drag region, which starts a window drag on mousedown; in a short
+// window it scrolls, and a press on its scrollbar must scroll instead.
+const barEl = document.querySelector(".bar");
+barEl.addEventListener("mousedown", (e) => e.target === barEl && e.offsetX >= barEl.clientWidth && e.stopPropagation());
+
+// L: text direction of the original and the result. "auto" lets each paragraph pick (CSS);
+// "rtl"/"ltr" force one, for a Persian paragraph that starts with a Latin word.
+let textDir = "auto";
+function setDir(d) {
+  textDir = d;
+  for (const e of [original, resultEl]) {
+    if (d === "auto") e.removeAttribute("dir");
+    else e.dir = d;
+  }
+}
+function cycleDir() {
+  setDir({ auto: "rtl", rtl: "ltr", ltr: "auto" }[textDir]);
+  setStatus(`Text direction: ${textDir === "auto" ? "auto, per paragraph" : textDir.toUpperCase()} (L)`);
+}
 
 let pinned = true; // default; matches the Rust side
 function setPinned(v) {
@@ -825,19 +855,12 @@ async function showAbout() {
     `- Config: \`${i.config_path}\``,
     "- Help: `mirzabenevis-cli doctor` checks your desktop setup",
     "",
-    "Keys: numbers run actions · / instruction · D diff · X what changed · U undo · M backend · P pin · Ctrl+, settings · Esc close",
+    "Keys: numbers run actions · / instruction · D diff · X what changed · U undo · M backend · L text direction · P pin · Ctrl+, settings · Esc close",
+    "",
+    "[GitHub: ehsanirani/mirzabenevis](https://github.com/ehsanirani/mirzabenevis) · "
+      + "[Report a problem](https://github.com/ehsanirani/mirzabenevis/issues)",
   ].join("\n");
   renderResult();
-  // Clickable links (the Markdown renderer deliberately has none).
-  const links = el("p", "links");
-  for (const [label, url] of [["GitHub: ehsanirani/mirzabenevis", "https://github.com/ehsanirani/mirzabenevis"], ["Report a problem", "https://github.com/ehsanirani/mirzabenevis/issues"]]) {
-    const b = el("button", "linkish", label);
-    b.type = "button";
-    b.title = url;
-    b.addEventListener("click", () => invoke("open_url", { url }).catch((e) => setStatus(String(e), true)));
-    links.append(b);
-  }
-  resultEl.append(links);
 }
 function openAppMenu(x, y) {
   openMenu([
@@ -1009,6 +1032,7 @@ async function onShown() {
   dirty = false;
   chat = null;
   noSelection = false;
+  setDir("auto");
   original.value = grabbed = "";
   grow();
   mods.clear();
@@ -1305,6 +1329,7 @@ const KEYS = {
   x: explainChange,
   m: openPicker,
   n: () => chatting() && newChat(),
+  l: cycleDir,
 };
 
 $("promptForm").addEventListener("submit", (e) => {
@@ -1365,8 +1390,8 @@ document.addEventListener("keydown", (e) => {
     }
     return; // everything else is typing; Enter in the instruction field submits its form
   }
-  // Native Enter: a Tab-focused button (another chip, ★, ×, the backend) clicks itself.
-  if (e.key === "Enter" && t.tagName === "BUTTON" && !t.classList.contains("active")) return;
+  // Native Enter: a Tab-focused button (another chip, ★, ×, the backend) or link clicks itself.
+  if (e.key === "Enter" && ((t.tagName === "BUTTON" && !t.classList.contains("active")) || t.tagName === "A")) return;
   const f = lookup(e);
   if (f) {
     e.preventDefault();
