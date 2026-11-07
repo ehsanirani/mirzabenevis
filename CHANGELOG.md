@@ -13,8 +13,8 @@ First release.
   back over the selection (Wayland and X11).
 - Finds the AI you already have without configuration: API keys (Anthropic, DeepSeek,
   OpenAI, Gemini, OpenRouter, ...), agent CLIs (Claude Code, Codex, Gemini CLI, `llm`),
-  local servers (Ollama, LM Studio, llama.cpp, vLLM, Jan) or a custom endpoint, with
-  fallback to the next one when a backend fails.
+  local servers (Ollama, LM Studio, llama.cpp, vLLM, Jan) or a custom endpoint. When a
+  backend fails, only another one from the same vendor is tried.
 - Popup with numbered actions, streaming results, an inline word diff, "explain what
   changed", modifiers (shorter, longer, warmer, formal, British, American) and a backend
   picker.
