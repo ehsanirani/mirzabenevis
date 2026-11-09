@@ -3,7 +3,7 @@
 All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.1.1 — 2026-11-09
 
 ### Changed
 - About opens in its own dialog, like Settings, instead of taking over the result pane.
