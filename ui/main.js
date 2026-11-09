@@ -104,7 +104,7 @@ addEventListener("resize", grow); // the 40% cap moves with the window
 // Links in rendered answers open in the browser; the popup itself never navigates. A middle
 // click is an auxclick, and WebKit's link context menu could open the link in the popup.
 for (const type of ["click", "auxclick", "contextmenu"]) {
-  for (const box of [resultEl, explainEl]) box.addEventListener(type, (e) => {
+  for (const box of [resultEl, explainEl, $("aboutText")]) box.addEventListener(type, (e) => {
     const a = e.target.closest("a[href]");
     if (!a) return;
     e.preventDefault();
@@ -252,7 +252,7 @@ function fitExplain() {
 }
 
 function renderExplain() {
-  const on = showExplain && !!result && !chat && !about;
+  const on = showExplain && !!result && !chat;
   if (!on && explainPane.contains(document.activeElement)) resultEl.focus();
   explainPane.hidden = !on;
   popupEl.classList.toggle("explaining", on);
@@ -303,12 +303,6 @@ function renderResult() {
     return;
   }
   if (running) return; // streaming text is written by the chunk listener
-  if (about) {
-    resultName.textContent = "· About";
-    resultEl.classList.add("md");
-    resultEl.replaceChildren(...md(about));
-    return;
-  }
   if (error) {
     resultEl.classList.add("error");
     resultEl.textContent = error;
@@ -893,10 +887,11 @@ function openChipMenu(a, x, y) {
   openMenu(items, x, y);
 }
 // App menu (☰): about, settings, config, quit.
-let about = ""; // Markdown shown in the result pane until the next run / open
+const aboutDlg = $("about");
+let aboutOpener = null;
 async function showAbout() {
   const i = await invoke("app_info");
-  about = [
+  $("aboutText").replaceChildren(...md([
     `## mirzabenevis ${i.version} · میرزابنویس`,
     "Select text anywhere, press a key, get it fixed, rewritten or translated.",
     "",
@@ -907,9 +902,12 @@ async function showAbout() {
     "",
     "[GitHub: ehsanirani/mirzabenevis](https://github.com/ehsanirani/mirzabenevis) · "
       + "[Report a problem](https://github.com/ehsanirani/mirzabenevis/issues)",
-  ].join("\n");
-  renderResult();
+  ].join("\n")));
+  aboutOpener = document.activeElement;
+  aboutDlg.showModal();
 }
+aboutDlg.addEventListener("close", () => (aboutOpener?.isConnected && aboutOpener !== document.body ? aboutOpener.focus() : home()));
+aboutDlg.addEventListener("click", (e) => e.target === aboutDlg && aboutDlg.close()); // the backdrop
 function openAppMenu(x, y) {
   openMenu([
     menuItem("About", showAbout),
@@ -1068,13 +1066,13 @@ async function reloadConfig() {
 
 async function onShown() {
   if (picker.open) picker.close();
+  if (aboutDlg.open) aboutDlg.close();
   if (settings.open) {
     document.activeElement?.blur(); // a half-typed value is saved (change fires on blur)
     settings.close();
   }
   const shown = ++runId; // forget whatever was running when the popup was last open
   running = false;
-  about = "";
   result = error = explain = "";
   showExplain = false;
   dirty = false;
@@ -1118,7 +1116,6 @@ async function onShown() {
 
 // Chips and R act on the original; the instruction field refines the result when there is one.
 async function run(id, refine = false) {
-  about = "";
   const input = refine ? result : original.value;
   if (!input.trim()) {
     setStatus("Nothing to work on", true);
@@ -1195,7 +1192,6 @@ const promptOf = (id) => (actions.find((a) => a.id === id)?.prompt || actionName
 
 // Chat: when nothing was selected, or as a follow-up to a show result (summary, explanation…).
 async function sendChat() {
-  about = "";
   const msg = promptEl.value.trim();
   if (!msg || running) return;
   if (!chat) {
@@ -1255,7 +1251,7 @@ function leaveChat() {
 // pane (or stops the explanation while it streams); X again shows it without asking again.
 async function explainChange() {
   if (running && showExplain && !chat) return cancelRun();
-  if (running || !result || chat || about || resultOutput === "show") return;
+  if (running || !result || chat || resultOutput === "show") return;
   showExplain = !showExplain;
   if (!showExplain || explain) {
     setStatus(showExplain ? "X hides the explanation" : "X shows what changed");

@@ -68,11 +68,8 @@ html, body {
 }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* The text boxes sit flush under their pane's label, where an outline would cross it: ring the pane. */
-@supports selector(:has(*)) {
-  .pane > :is(textarea, .result-text):focus-visible { outline: none; }
-  .pane:has(> :is(textarea, .result-text):focus-visible) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-}
+/* The text boxes sit flush under their pane's label, where an outline would cross it: ring inside the box. */
+.pane > :is(textarea, .result-text):focus-visible { outline-offset: -2px; }
 
 .titlebar {
   display: flex;
@@ -332,7 +329,7 @@ html, body {
 .backend.error { color: var(--error); border-color: var(--error); }
 .backend:hover { border-color: var(--accent); color: var(--ink); }
 
-#picker, #settings {
+#picker, #settings, #about {
   width: min(560px, calc(92vw / var(--z, 1)));
   max-height: calc(80vh / var(--z, 1));
   padding: 6px;
@@ -342,9 +339,10 @@ html, body {
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, .3);
 }
-#picker::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .2); }
+#picker::backdrop, #settings::backdrop, #about::backdrop { background: rgba(0, 0, 0, .2); }
 
 /* Settings: tabs on the left, the fields of one tab on the right. */
+#about .result-text { padding: 6px 10px 0; }
 #settings { width: min(calc(96vw / var(--z, 1)), 1100px); max-width: none; height: calc(90vh / var(--z, 1)); max-height: none; }
 #settings[open] { display: flex; flex-direction: column; }
 .settings { flex: 1; min-height: 0; display: flex; gap: 8px; }

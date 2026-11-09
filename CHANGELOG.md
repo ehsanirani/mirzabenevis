@@ -3,6 +3,12 @@
 All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Changed
+- About opens in its own dialog, like Settings, instead of taking over the result pane.
+- The keyboard focus ring on the original and result text boxes sits inside the box, so it no longer crosses the pane's label.
+
 ## 0.1.0 — 2026-11-08
 
 First release.
