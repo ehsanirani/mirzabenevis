@@ -135,7 +135,7 @@ changed from the popup's settings window. Backends, actions, modifiers and the r
 
 ## Status
 
-Early: version 0.1.2. It works on Linux, on Wayland and X11. Which tools
+Early: version 0.1.3. It works on Linux, on Wayland and X11. Which tools
 grab and paste on each desktop (GNOME, KDE, Hyprland, Sway, X11) is in
 [docs/cli.md](docs/cli.md#grab-and-paste-on-linux).
 

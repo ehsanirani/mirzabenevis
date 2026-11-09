@@ -3,7 +3,7 @@
 All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.1.3 — 2026-11-09
 
 ### Added
 - Settings → General sets the shortcut that opens the popup on GNOME: click the box and press the keys. On other desktops it shows how to bind it, with a Copy button.
