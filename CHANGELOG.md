@@ -3,6 +3,11 @@
 All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.2 — 2026-11-09
+
+### Fixed
+- The `.deb` and AppImage run on Debian 12 and Ubuntu 22.04: they are now built against glibc 2.35 instead of 2.39.
+
 ## 0.1.1 — 2026-11-09
 
 ### Changed

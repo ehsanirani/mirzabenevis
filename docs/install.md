@@ -56,13 +56,15 @@ On Hyprland or Sway, bind `mirzabenevis --popup` yourself (`doctor` prints the l
 
 Download the `.deb` or `.AppImage` from the
 [Releases](https://github.com/ehsanirani/mirzabenevis/releases) page. They are built on
-Ubuntu 24.04 and need glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+, Fedora 40+).
+Ubuntu 22.04 and need glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, Fedora 36+).
 
 ```sh
 sudo apt install ./mirzabenevis_*_amd64.deb   # pulls in webkit, the tray library, wl-clipboard, ydotool
 ```
 
 The `.deb` contains `mirzabenevis-cli` too; the AppImage has only the tray app.
+The AppImage needs FUSE 2 (`sudo apt install libfuse2`, or `libfuse2t64` on Ubuntu 24.04+);
+without it, run it as `./mirzabenevis_*.AppImage --appimage-extract-and-run`.
 On GNOME/KDE Wayland pasting needs the `ydotoold` daemon running and access to its
 socket (usually: enable the `ydotool` systemd service and add yourself to the group that
 owns the socket). Then bind `mirzabenevis --popup` to a key: `mirzabenevis-cli doctor`

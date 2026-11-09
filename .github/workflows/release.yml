@@ -8,8 +8,9 @@ permissions:
 
 jobs:
   release:
-    # The .deb and AppImage need glibc >= 2.39 (Ubuntu 24.04, Debian 13, Fedora 40).
-    runs-on: ubuntu-24.04
+    # Oldest supported runner: the .deb and AppImage link against its glibc (2.35),
+    # so they run on Ubuntu 22.04+, Debian 12+ and Fedora 36+.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - run: |
