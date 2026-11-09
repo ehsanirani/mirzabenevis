@@ -353,6 +353,9 @@ html, body {
 .set-pane { flex: 1; min-width: 0; overflow: auto; padding: 2px 6px 2px 2px; }
 .set-pane > .field { max-width: 30em; }
 .set-pane > .note { margin: 0 0 8px; }
+.welcome { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; background: var(--ins); }
+.welcome span { flex: 1; }
+.welcome[hidden] { display: none; }
 .set-pane > .lbtn { margin-bottom: 10px; }
 .set-row { display: flex; gap: 4px; }
 .field { display: flex; flex-direction: column; gap: 2px; margin: 0 0 10px; min-width: 0; }

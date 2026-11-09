@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=Utility;
+Comment={{comment}}
+Exec=mirzabenevis --popup
+StartupWMClass=mirzabenevis
+Icon=mirzabenevis
+Name=mirzabenevis
+Terminal=false
+Type=Application

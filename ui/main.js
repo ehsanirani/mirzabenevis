@@ -677,13 +677,73 @@ async function addEntry(cmd, args, selector) {
   f?.select();
 }
 
+let sc = null; // the last get_shortcut answer
+let superHeld = false; // WebKitGTK may not report Super as metaKey
+const SUPER_KEYS = ["Meta", "OS", "Super", "Hyper"];
+
+// A key press as a GNOME accelerator ("<Control><Super>g"), or null when it is not a shortcut.
+// Keys by position (e.code), so a Persian layout gives the same shortcut as a Latin one.
+function accelOf(e) {
+  const fkey = /^F\d+$/.test(e.code);
+  const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase()
+    : /^Digit\d$/.test(e.code) ? e.code.slice(5)
+      : fkey ? e.code : e.code === "Space" ? "space" : null;
+  const sup = e.metaKey || superHeld;
+  if (!key || !(fkey || e.ctrlKey || e.altKey || sup)) return null; // Tab, Shift+Tab, Esc pass through
+  return (e.ctrlKey ? "<Control>" : "") + (e.altKey ? "<Alt>" : "") + (e.shiftKey ? "<Shift>" : "") + (sup ? "<Super>" : "") + key;
+}
+// "<Control>space" → "Ctrl+Space"
+const accelLabel = (a) => a.replace(/<(\w+)>/g, (_, m) => `${m === "Control" ? "Ctrl" : m}+`)
+  .replace(/[a-z]$|space$/, (k) => k[0].toUpperCase() + k.slice(1));
+
+// GNOME: press keys in the box and the shortcut is set. Elsewhere: how to bind it by hand.
+function shortcutField() {
+  const label = "Shortcut to open mirzabenevis";
+  if (!sc) return field(label, textIn("", { readOnly: true }), null, "Could not read the desktop's shortcuts");
+  if (!sc.gnome) {
+    const f = field(label, Object.assign(el("textarea"), { readOnly: true, value: sc.help, rows: 3 }), null,
+      "Add it in your desktop's keyboard settings");
+    f.append(smallBtn("Copy", "Copy these instructions", async () => { await invoke("copy", { result: sc.help }); setMsg("Copied"); }));
+    return f;
+  }
+  const save = async (binding) => {
+    try {
+      sc = await invoke("set_shortcut", { binding });
+      setMsg(binding ? `${accelLabel(binding)} now opens mirzabenevis` : "Shortcut removed");
+    } catch (e) {
+      setMsg(String(e), true);
+    }
+    renderSettings();
+  };
+  const input = textIn(sc.binding ? accelLabel(sc.binding) : "", { readOnly: true, placeholder: "Click here, then press the keys, e.g. Super+G" });
+  input.addEventListener("keydown", (e) => {
+    if (SUPER_KEYS.includes(e.key)) superHeld = true;
+    const a = accelOf(e);
+    if (!a) return;
+    e.preventDefault();
+    e.stopPropagation();
+    save(a);
+  });
+  input.addEventListener("keyup", (e) => SUPER_KEYS.includes(e.key) && (superHeld = false));
+  input.addEventListener("blur", () => (superHeld = false));
+  const f = field(label, input, null, sc.binding
+    ? "Works in every app. To change it, click the box and press other keys"
+    : "Not set yet. Click the box and press the keys you want, or use Super+G");
+  f.append(sc.binding
+    ? smallBtn("Remove", "Remove the shortcut", () => save(null))
+    : smallBtn("Use Super+G", "Open mirzabenevis with Super+G", () => save("<Super>g")));
+  return f;
+}
+
 const TABS = {
   General: () => {
     const g = sv.general;
     return [
+      shortcutField(),
       field("Default action (Enter)", selectIn(g.default_action, sv.actions.map((a) => [a.id, a.name])), setting("general.default_action")),
       field("Replace the selection automatically", checkIn(g.auto_paste), setting("general.auto_paste"), "Off: Enter copies the result instead"),
       field("Paste by", selectIn(sv.paste, [["clipboard", "Clipboard + Ctrl+V"], ["type", "Typing the text"]]), setting("linux.paste")),
+      field("Show the tray icon", checkIn(g.tray), setting("general.tray"), "Off: open mirzabenevis with the shortcut or from the app menu"),
       field("Keep a history (undo, recent instructions)", checkIn(g.history), setting("general.history")),
       field("Desktop notifications (CLI)", checkIn(g.notify), setting("general.notify")),
       field("Explanations in", textIn(g.explain_in, { placeholder: "the language of the text" }), setting("general.explain_in"), "Language of Explain and X, e.g. fa or German"),
@@ -768,7 +828,7 @@ const TABS = {
       field("Timeout (seconds)", numIn(sv.timeout_secs, { min: 1, step: 1 }), setting("provider.timeout_secs")),
       field("Longest input (characters)", numIn(sv.general.max_input_chars, { min: 1, step: 1 }), setting("general.max_input_chars")),
       field("Global hotkey", textIn(sv.general.hotkey, { placeholder: "e.g. Ctrl+Space" }), setting("general.hotkey"),
-        "X11 only, used after a restart. On Wayland bind mirzabenevis --popup in your desktop's keyboard settings"),
+        "X11 only, used after a restart. On Wayland use the shortcut in General"),
       field("Config file", textIn(sv.config_path, { readOnly: true })),
       row,
       resetTab("advanced"),
@@ -828,7 +888,7 @@ $("setTabs").addEventListener("keydown", (e) => {
 async function openSettings() {
   if (settings.open) return;
   try {
-    sv = await invoke("get_settings");
+    [sv, sc] = await Promise.all([invoke("get_settings"), invoke("get_shortcut").catch(() => null)]);
   } catch (e) {
     return setStatus(String(e), true);
   }
@@ -842,7 +902,9 @@ async function openSettings() {
 }
 // Esc: save what is being typed (change fires on blur) before the dialog goes.
 settings.addEventListener("cancel", () => document.activeElement?.blur());
-settings.addEventListener("close", () => (settingsOpener?.isConnected && settingsOpener !== document.body ? settingsOpener.focus() : home()));
+settings.addEventListener("close", () => {
+  settingsOpener?.isConnected && settingsOpener !== document.body ? settingsOpener.focus() : home();
+});
 settings.addEventListener("click", (e) => e.target === settings && settings.close()); // the backdrop
 
 function chip(key, label, title, cls, onClick) {
@@ -1065,6 +1127,7 @@ async function reloadConfig() {
 }
 
 async function onShown() {
+  $("welcome").hidden = true; // shown on the first run only
   if (picker.open) picker.close();
   if (aboutDlg.open) aboutDlg.close();
   if (settings.open) {
@@ -1112,7 +1175,26 @@ async function onShown() {
   idleStatus(...grabStatus);
   renderResult();
   home();
+  // First run: one line on how to open the popup from any app.
+  const w = await invoke("take_welcome").catch(() => null);
+  if (w) {
+    $("welcomeText").textContent = w.key
+      ? `Welcome! Select text in any app and press ${accelLabel(w.key)} to open mirzabenevis.`
+      : "Welcome! Pick a key that opens mirzabenevis from any app.";
+    $("welcomeKey").textContent = w.key ? "Change key" : "Pick a key";
+    $("welcome").hidden = false;
+  }
 }
+$("welcomeClose").addEventListener("click", () => {
+  $("welcome").hidden = true;
+  home();
+});
+$("welcomeKey").addEventListener("click", async () => {
+  $("welcome").hidden = true;
+  setTab = "General";
+  await openSettings();
+  setPane.querySelector('[data-f="Shortcut to open mirzabenevis"]')?.focus();
+});
 
 // Chips and R act on the original; the instruction field refines the result when there is one.
 async function run(id, refine = false) {

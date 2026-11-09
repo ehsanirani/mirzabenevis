@@ -16,6 +16,11 @@
       <button id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-haspopup="menu">☰</button>
       <button id="closeBtn" type="button" title="Close (Esc)" aria-label="Close">×</button>
     </header>
+    <div id="welcome" class="welcome" role="status" hidden>
+      <span id="welcomeText"></span>
+      <button class="lbtn" id="welcomeKey" type="button">Change key</button>
+      <button class="lbtn" id="welcomeClose" type="button" title="Dismiss" aria-label="Dismiss">×</button>
+    </div>
     <section class="pane original">
       <div class="label">Original <span><button class="lbtn" id="pasteBtn" type="button" title="Replace the text with the clipboard">Paste</button><button class="lbtn" id="clearBtn" type="button" title="Clear the text">Clear</button> <kbd>E</kbd> edit</span></div>
       <textarea id="original" rows="2" spellcheck="false" aria-label="Original text"

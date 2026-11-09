@@ -33,6 +33,8 @@ history = true
 # Language of explanations ({explain_in}: the Explain action, the popup's X),
 # e.g. "fa" or "German". Empty = the language of the text.
 explain_in = ""
+# Show the tray icon. Off: open the popup with your shortcut or from the app menu.
+tray = true
 
 [provider]
 # Which AI backend to use. "auto" picks the first one found on this machine,

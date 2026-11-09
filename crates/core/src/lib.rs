@@ -5,6 +5,7 @@
 //!   agent CLIs such as Claude Code, local model servers)
 //! - [`provider`] stream completions from a backend
 //! - [`text`]     grab the selected text and paste a result back (Linux first)
+//! - [`shortcut`] the key that opens the popup, per desktop
 //! - [`history`]  successful runs, for undo and recent instructions
 //! - [`run_action`] glue them together; [`chat`] for free conversation
 
@@ -12,6 +13,7 @@ pub mod backends;
 pub mod config;
 pub mod history;
 pub mod provider;
+pub mod shortcut;
 pub mod text;
 
 pub use backends::{Backend, Detection};

@@ -13,7 +13,9 @@ use mirzabenevis_core::config::{
     self, default_actions, default_modifiers, Appearance, General, Modifier, Output, PasteMode,
     Translate, RESERVED_KEYS,
 };
-use mirzabenevis_core::{backends, history, text, Action, Backend, Config, Detection, Turn};
+use mirzabenevis_core::{
+    backends, history, shortcut, text, Action, Backend, Config, Detection, Turn,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{
@@ -22,7 +24,7 @@ use std::sync::{
 };
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{TrayIcon, TrayIconBuilder},
     AppHandle, Emitter, Manager, State, WebviewWindow,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -41,6 +43,9 @@ struct AppState {
     /// Set while `accept` runs, so the focus-loss handler does not hide a popup
     /// that `accept` just showed again.
     accepting: AtomicBool,
+    /// First run: shown once, when the popup first opens.
+    welcome: Mutex<Option<Welcome>>,
+    tray: Mutex<Option<TrayIcon>>,
 }
 
 /// A streamed piece of the answer, tagged with the run it belongs to so the
@@ -273,6 +278,7 @@ fn saved(state: &AppState, fresh: anyhow::Result<Config>) -> Result<SettingsView
     let view = settings_view(&fresh);
     *state.cfg.lock().unwrap() = fresh;
     config_changed(state, false);
+    apply_tray(state);
     Ok(view)
 }
 
@@ -444,6 +450,14 @@ async fn detection(state: &State<'_, AppState>, refresh: bool) -> (Config, Detec
 /// The config changed (call after updating `state.cfg`): a detection in
 /// flight is not cached; `forget` also drops the cached one. Under the
 /// detection lock, so a detection cannot store between the two.
+/// Show or hide the tray icon as `general.tray` says.
+fn apply_tray(state: &AppState) {
+    let show = state.cfg.lock().unwrap().general.tray;
+    if let Some(t) = &*state.tray.lock().unwrap() {
+        let _ = t.set_visible(show);
+    }
+}
+
 fn config_changed(state: &AppState, forget: bool) {
     let mut cached = state.detection.lock().unwrap();
     state.generation.fetch_add(1, Ordering::SeqCst);
@@ -710,6 +724,7 @@ fn reload_config(state: State<AppState>) -> Result<(), String> {
     let fresh = Config::load().map_err(|e| e.to_string())?;
     *state.cfg.lock().unwrap() = fresh.clone();
     config_changed(&state, true);
+    apply_tray(&state);
     // Re-read the login shell too (new API keys in ~/.zshrc, new CLIs on PATH).
     tauri::async_runtime::spawn(async move {
         let _ = backends::detect_current(&fresh, true).await;
@@ -780,6 +795,77 @@ fn open_url(url: String) -> Result<(), String> {
     xdg_open(&url)
 }
 
+#[derive(Serialize)]
+struct ShortcutView {
+    /// GNOME: Settings can set the shortcut itself.
+    gnome: bool,
+    /// The GNOME accelerator now bound, e.g. `<Super>g`.
+    binding: Option<String>,
+    /// Elsewhere: how to bind it by hand.
+    help: String,
+}
+
+fn shortcut_view() -> Result<ShortcutView, String> {
+    let desk = shortcut::desktop(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default());
+    let gnome = desk == shortcut::Desktop::Gnome;
+    Ok(ShortcutView {
+        gnome,
+        binding: if gnome {
+            shortcut::gnome_get().map_err(|e| format!("{e:#}"))?
+        } else {
+            None
+        },
+        help: shortcut::keybinding_help(desk),
+    })
+}
+
+#[tauri::command]
+fn get_shortcut() -> Result<ShortcutView, String> {
+    shortcut_view()
+}
+
+/// Bind the popup to `binding` on GNOME, or remove our shortcut when `None`.
+#[tauri::command]
+fn set_shortcut(binding: Option<String>) -> Result<ShortcutView, String> {
+    match binding {
+        Some(b) => shortcut::gnome_set(&b, &shortcut::popup_command()),
+        None => shortcut::gnome_remove(),
+    }
+    .map_err(|e| format!("{e:#}"))?;
+    shortcut_view()
+}
+
+#[derive(Serialize)]
+struct Welcome {
+    /// The shortcut set for the user (GNOME), e.g. `<Super>g`.
+    key: Option<String>,
+}
+
+/// The first time the app starts: set a default shortcut where we can.
+fn welcome() -> Option<Welcome> {
+    let marker = history::path().ok()?.with_file_name("welcomed");
+    if marker.exists() {
+        return None;
+    }
+    std::fs::create_dir_all(marker.parent()?).ok()?;
+    std::fs::write(&marker, "").ok()?; // unwritable: no welcome, rather than one every start
+    let desk = shortcut::desktop(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default());
+    let key = if desk == shortcut::Desktop::Gnome {
+        shortcut::gnome_default(&shortcut::popup_command()).unwrap_or_else(|e| {
+            tracing::warn!("could not set the default shortcut: {e:#}");
+            None
+        })
+    } else {
+        None
+    };
+    Some(Welcome { key })
+}
+
+#[tauri::command]
+fn take_welcome(state: State<AppState>) -> Option<Welcome> {
+    state.welcome.lock().unwrap().take()
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
@@ -811,6 +897,8 @@ pub fn run() {
             running: Mutex::new(None),
             pinned: AtomicBool::new(true),
             accepting: AtomicBool::new(false),
+            welcome: Mutex::new(None),
+            tray: Mutex::new(None),
         })
         // `mirzabenevis --popup` while running => show the popup. This is the
         // Wayland-friendly "hotkey": bind that command in your compositor.
@@ -863,6 +951,9 @@ pub fn run() {
             read_clipboard,
             open_config,
             open_url,
+            get_shortcut,
+            set_shortcut,
+            take_welcome,
             quit
         ])
         .setup(move |app| {
@@ -882,7 +973,7 @@ pub fn run() {
             let cfg_item = MenuItem::with_id(app, "config", "Config file path", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &reload, &cfg_item, &quit])?;
-            TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().cloned().expect("icon in tauri.conf.json"))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -903,6 +994,9 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+            let state = app.state::<AppState>();
+            *state.tray.lock().unwrap() = Some(tray);
+            apply_tray(&state);
 
             // Hide on focus loss, like a launcher, unless pinned.
             if let Some(w) = popup(app.handle()) {
@@ -923,8 +1017,12 @@ pub fn run() {
                 });
             }
 
-            // Started with --popup: show it right away.
-            if std::env::args().any(|a| a == "--popup") {
+            // Started with --popup, or for the first time: show it right away.
+            // In setup, so a second instance (which only forwards --popup) never runs it.
+            let w = welcome();
+            let first = w.is_some();
+            *app.state::<AppState>().welcome.lock().unwrap() = w;
+            if first || std::env::args().any(|a| a == "--popup") {
                 show_popup(app.handle());
             }
             Ok(())

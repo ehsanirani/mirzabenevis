@@ -83,8 +83,10 @@ module, building from source and the GNOME tray extension are covered in
    bind = SUPER, G, exec, mirzabenevis --popup
    ```
 
-   On GNOME or KDE, add a custom shortcut with that command (the Home Manager module can
-   write the GNOME one, with one line of your own: see [docs/install.md](docs/install.md#home-manager)). The command starts the tray app if it is not running yet.
+   On GNOME this is done for you: the first time mirzabenevis starts it binds Super+G (or
+   Ctrl+Alt+G when Super+G is taken) and tells you which. Change it in Settings (`Ctrl+,`)
+   → General: click the shortcut box and press the keys you want. On KDE, add a custom shortcut with that
+   command; Settings shows the steps. The command starts the tray app if it is not running yet.
 
 3. Select some text, press your key, press `1` (Fix grammar), then `Enter` to paste the
    result over the selection.

@@ -1,31 +1,9 @@
 //! `mirzabenevis-cli doctor`: what works on this desktop, what is missing and
 //! how to bind the key. Read-only: it never installs or writes anything.
 
+pub use mirzabenevis_core::shortcut::{desktop, keybinding_help, Desktop};
 use mirzabenevis_core::text::{self, PasteResult};
 use mirzabenevis_core::{backends, Config};
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Desktop {
-    Gnome,
-    Kde,
-    Hyprland,
-    Sway,
-    Other,
-}
-
-/// From `XDG_CURRENT_DESKTOP`, e.g. `ubuntu:GNOME`.
-pub fn desktop(xdg_current_desktop: &str) -> Desktop {
-    for part in xdg_current_desktop.split(':') {
-        match part.to_ascii_lowercase().as_str() {
-            "gnome" => return Desktop::Gnome,
-            "kde" => return Desktop::Kde,
-            "hyprland" => return Desktop::Hyprland,
-            "sway" => return Desktop::Sway,
-            _ => {}
-        }
-    }
-    Desktop::Other
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Distro {
@@ -74,41 +52,6 @@ pub fn install_hint(distro: Distro, tool: &str) -> String {
         (Distro::Fedora, _) => format!("sudo dnf install {pkg}"),
         (Distro::Arch, _) => format!("sudo pacman -S {pkg}"),
         (Distro::Other, _) => format!("install {pkg}"),
-    }
-}
-
-/// Where to bind `mirzabenevis --popup` on this desktop (all of them when unknown).
-pub fn keybinding_help(d: Desktop) -> String {
-    const GNOME: &str = "\
-GNOME: Settings → Keyboard → View and Customise Shortcuts → Custom Shortcuts → +
-  Name: mirzabenevis   Command: mirzabenevis --popup   Shortcut: Super+G
-Or from a terminal. The first line replaces your list of custom shortcuts: if
-`gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings`
-is not empty, add the path to that list instead.
-  gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings \"['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/mirzabenevis/']\"
-  K=org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/mirzabenevis/
-  gsettings set $K name mirzabenevis
-  gsettings set $K command 'mirzabenevis --popup'
-  gsettings set $K binding '<Super>g'
-";
-    const KDE: &str = "\
-KDE: System Settings → Keyboard → Shortcuts → Add New → Command or Script…
-  Command: mirzabenevis --popup
-";
-    const HYPRLAND: &str = "\
-Hyprland (~/.config/hypr/hyprland.conf):
-  bind = SUPER, G, exec, mirzabenevis --popup
-";
-    const SWAY: &str = "\
-Sway (~/.config/sway/config):
-  bindsym $mod+g exec mirzabenevis --popup
-";
-    match d {
-        Desktop::Gnome => GNOME.into(),
-        Desktop::Kde => KDE.into(),
-        Desktop::Hyprland => HYPRLAND.into(),
-        Desktop::Sway => SWAY.into(),
-        Desktop::Other => [GNOME, KDE, HYPRLAND, SWAY].join("\n"),
     }
 }
 

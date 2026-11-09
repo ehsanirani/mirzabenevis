@@ -3,6 +3,19 @@
 All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+- Settings → General sets the shortcut that opens the popup on GNOME: click the box and press the keys. On other desktops it shows how to bind it, with a Copy button.
+- On first start, GNOME gets a shortcut to open the popup (Super+G, or Ctrl+Alt+G if Super+G is taken), and the popup opens with a one-line welcome saying which key it is.
+- Settings → General can hide the tray icon (`general.tray`).
+
+### Changed
+- The `.deb`'s app-menu entry opens the popup instead of starting only the tray, which GNOME does not show without an extension.
+
+### Fixed
+- Only one tray icon: a second one, without a menu, was created as well.
+
 ## 0.1.2 — 2026-11-09
 
 ### Fixed

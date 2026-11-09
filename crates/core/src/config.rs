@@ -110,6 +110,8 @@ pub struct General {
     /// Language for `{explain_in}` (Explain, the popup's explain-change);
     /// empty = the language of the text.
     pub explain_in: String,
+    /// Show the tray icon (the popup opens from the shortcut or the app menu either way).
+    pub tray: bool,
 }
 
 /// Which AI backend to use. See [`crate::backends`] for what gets detected.
@@ -310,6 +312,7 @@ impl Default for General {
             max_input_chars: 40_000,
             history: true,
             explain_in: String::new(),
+            tray: true,
         }
     }
 }
@@ -584,6 +587,7 @@ pub const SECTIONS: &[(&str, &[&str])] = &[
             "general.notify",
             "general.history",
             "general.explain_in",
+            "general.tray",
             "linux.paste",
         ],
     ),
