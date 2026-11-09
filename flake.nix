@@ -2,8 +2,9 @@
   description = "mirzabenevis — select text anywhere, press a key, get it rewritten";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.crane.url = "github:ipetkov/crane";
 
-  outputs = { self, nixpkgs, ... }:
+  outputs = { self, nixpkgs, crane, ... }:
     let
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ]
         (system: f nixpkgs.legacyPackages.${system});
@@ -28,44 +29,66 @@
       };
     in
     {
-      packages = forAllSystems (pkgs: {
-        # The tray app + popup. The deb bundle also carries mirzabenevis-cli
-        # (tauri.conf.json), so this installs both binaries.
-        default = pkgs.rustPlatform.buildRustPackage {
-          pname = "mirzabenevis";
-          inherit version src;
-          cargoLock.lockFile = ./Cargo.lock;
-          cargoRoot = ".";
-          buildAndTestSubdir = "src-tauri";
-          # The tray library is dlopen()ed by name: point it at the store path.
-          postPatch = ''
-            substituteInPlace $cargoDepsCopy/libappindicator-sys-*/src/lib.rs \
-              --replace-fail "libayatana-appindicator3.so.1" "${pkgs.libayatana-appindicator}/lib/libayatana-appindicator3.so.1"
-          '';
-          # The hook sets CARGO_BUILD_TARGET, so beforeBuildCommand's CLI lands in
-          # target/<triple>/release; point the deb's file mapping there.
-          preBuild = ''
-            mkdir -p target/release
-            ln -s ../${pkgs.stdenv.hostPlatform.rust.cargoShortTarget}/release/mirzabenevis-cli target/release/
-          '';
-          nativeBuildInputs = with pkgs; [ cargo-tauri.hook pkg-config wrapGAppsHook3 ];
-          buildInputs = with pkgs; [ webkitgtk_4_1 dbus libayatana-appindicator ];
-          meta = meta // { mainProgram = "mirzabenevis"; };
-        };
+      packages = forAllSystems (pkgs:
+        let
+          craneLib = crane.mkLib pkgs;
+          # Shared by the deps-only build and the final builds, so the
+          # cached dependency artifacts match and are reused.
+          commonArgs = {
+            inherit src version;
+            pname = "mirzabenevis";
+            strictDeps = true;
+            cargoExtraArgs = "-p mirzabenevis -p mirzabenevis-cli --features mirzabenevis/custom-protocol";
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = with pkgs; [ webkitgtk_4_1 dbus libayatana-appindicator ];
+          };
+          # All third-party crates, built once. Only changes when Cargo.lock does.
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        in
+        {
+          # The tray app + popup + CLI.
+          default = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+            doCheck = false; # core + cli tests run in the cli package
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.wrapGAppsHook3 ];
+            # The tray library is dlopen()ed by name.
+            preFixup = ''
+              gappsWrapperArgs+=(--prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libayatana-appindicator ]})
+            '';
+            postInstall = ''
+              for s in 32x32 128x128; do
+                install -Dm644 src-tauri/icons/$s.png $out/share/icons/hicolor/$s/apps/mirzabenevis.png
+              done
+              install -Dm644 src-tauri/icons/128x128@2x.png $out/share/icons/hicolor/256x256/apps/mirzabenevis.png
+              install -Dm644 src-tauri/icons/icon.png $out/share/icons/hicolor/512x512/apps/mirzabenevis.png
+              install -Dm644 /dev/stdin $out/share/applications/mirzabenevis.desktop <<EOF
+              [Desktop Entry]
+              Categories=Utility;
+              Comment=Select text anywhere, press a key, get it rewritten
+              Exec=mirzabenevis
+              StartupWMClass=mirzabenevis
+              Icon=mirzabenevis
+              Name=mirzabenevis
+              Terminal=false
+              Type=Application
+              EOF
+            '';
+            meta = meta // { mainProgram = "mirzabenevis"; };
+          });
 
-        # Just the headless CLI, no GTK.
-        cli = pkgs.rustPlatform.buildRustPackage {
-          pname = "mirzabenevis-cli";
-          inherit version src;
-          cargoLock.lockFile = ./Cargo.lock;
-          cargoBuildFlags = [ "-p" "mirzabenevis-cli" ];
-          cargoTestFlags = [ "-p" "mirzabenevis-core" "-p" "mirzabenevis-cli" ];
-          # Agent backends run in a work dir under the cache dir; one test uses ps.
-          preCheck = "export HOME=$TMPDIR";
-          nativeCheckInputs = [ pkgs.procps ];
-          meta = meta // { mainProgram = "mirzabenevis-cli"; };
-        };
-      });
+          # Just the headless CLI, no GTK.
+          cli = craneLib.buildPackage {
+            inherit src version;
+            pname = "mirzabenevis-cli";
+            strictDeps = true;
+            cargoExtraArgs = "-p mirzabenevis-cli";
+            cargoTestExtraArgs = "-p mirzabenevis-core";
+            # Agent backends run in a work dir under the cache dir; one test uses ps.
+            preCheck = "export HOME=$TMPDIR";
+            nativeCheckInputs = [ pkgs.procps ];
+            meta = meta // { mainProgram = "mirzabenevis-cli"; };
+          };
+        });
 
       apps = forAllSystems (pkgs: {
         default = {

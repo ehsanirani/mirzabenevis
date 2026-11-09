@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Writing assistant popup: select text, press a key, rewrite"
 
+[features]
+# What `cargo tauri build` turns on: serve ui/ from the binary, not a dev server.
+custom-protocol = ["tauri/custom-protocol"]
+
 [lib]
 name = "mirzabenevis_lib"
 
